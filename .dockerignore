@@ -1,0 +1,20 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# Node / frontend build artefacts
+frontend/node_modules
+frontend/dist
+
+# Go build artefacts
+bin/
+backend/cmd/vyos-cp/static/*
+!backend/cmd/vyos-cp/static/.gitkeep
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp

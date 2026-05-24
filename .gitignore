@@ -1,0 +1,20 @@
+# Secrets — NEVER commit
+.env
+
+# Dependencies & build output
+node_modules/
+frontend/node_modules/
+frontend/dist/
+backend/cmd/vyos-cp/static/
+
+# Backup litter from patching
+*.bak
+*.bak.*
+.ship1-backup/
+.ship2-backup/
+
+# Database dumps (data, not code)
+db-*.sql
+
+# OS noise
+.DS_Store

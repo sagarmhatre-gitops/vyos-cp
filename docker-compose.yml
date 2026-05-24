@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vyoscp
+      POSTGRES_PASSWORD: vyoscp
+      POSTGRES_DB: vyoscp
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vyoscp -d vyoscp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Exposed only for local debugging; in prod leave closed to the host.
+    ports: ["127.0.0.1:5432:5432"]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      VYOS_CP_DSN: "postgres://vyoscp:vyoscp@db:5432/vyoscp?sslmode=disable"
+      # Generate these ONCE and keep them stable. See README.
+      VYOS_CP_SEAL_KEY: "${VYOS_CP_SEAL_KEY}"
+      VYOS_CP_JWT_KEY:  "${VYOS_CP_JWT_KEY}"
+      # Safety: commits auto-revert unless confirmed within N minutes. 0 disables.
+      # NOTE: VyOS 1.5-rolling changed the commit-confirm protocol; set to 0 for
+      # now to avoid the 'Malformed command' error until we update the client.
+      VYOS_CP_COMMIT_CONFIRM_MINUTES: "${VYOS_CP_COMMIT_CONFIRM_MINUTES:-0}"
+      # How often the poller refreshes device status + counters.
+      VYOS_CP_POLL_INTERVAL_SEC: "10"
+      VYOS_CP_LISTEN: ":8080"
+    ports:
+      - "8080:8080"
+
+volumes:
+  db-data:

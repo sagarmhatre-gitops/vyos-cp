@@ -1,0 +1,501 @@
+package translator
+
+// IPsec translator. Mirrors the shape of translator/nat_zones.go:
+// one Ops function per domain object that returns []vyos.ConfigureOp,
+// one DeleteXOps that wipes the parent path, one DecodeX that parses
+// the JSON returned by client.Retrieve(OpShowConfig, ...).
+//
+// VyOS reference paths (verified against 1.4 Sagitta / 1.5 Circinus):
+//   vpn ipsec ike-group <name>
+//     proposal <N> encryption <cipher>
+//     proposal <N> hash <hash>
+//     proposal <N> dh-group <group>
+//     lifetime <sec>
+//     key-exchange <ikev1|ikev2>
+//     mode <main|aggressive>
+//     dead-peer-detection { action interval timeout }
+//   vpn ipsec esp-group <name>
+//     proposal <N> encryption <cipher>
+//     proposal <N> hash <hash>
+//     lifetime <sec>
+//     mode <tunnel|transport>
+//     pfs <enable|disable|dh-groupN>
+//   vpn ipsec site-to-site peer <peer-id>
+//     remote-address <ip|fqdn|any>
+//     local-address <ip|any>
+//     ike-group <ref>
+//     default-esp-group <ref>
+//     authentication { mode <psk|rsa|x509> ... }
+//     tunnel <N> { local prefix ... | remote prefix ... | esp-group <ref> ... }
+//   vpn ipsec ipsec-interfaces interface <if>
+//   vpn ipsec nat-traversal <enable|disable>
+
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strconv"
+
+	"github.com/vyos-cp/vyos-cp/internal/model"
+	"github.com/vyos-cp/vyos-cp/internal/vyos"
+)
+
+// --- Encode: IKE group -----------------------------------------------------
+
+func IKEGroupOps(g model.IKEGroup) ([]vyos.ConfigureOp, error) {
+	if g.Name == "" {
+		return nil, fmt.Errorf("ike-group name required")
+	}
+	if len(g.Proposals) == 0 {
+		return nil, fmt.Errorf("ike-group %q: at least one proposal required", g.Name)
+	}
+	base := []string{"vpn", "ipsec", "ike-group", g.Name}
+	var ops []vyos.ConfigureOp
+	leaf := func(val string, keys ...string) {
+		if val != "" {
+			ops = append(ops, vyos.ConfigureOp{Op: vyos.OpSet, Path: joinPath(base, keys...), Value: val})
+		}
+	}
+	if g.Lifetime > 0 {
+		leaf(strconv.Itoa(g.Lifetime), "lifetime")
+	}
+	leaf(g.IKEVersion, "key-exchange")
+	if g.Mode != "" {
+		leaf(string(g.Mode), "mode")
+	}
+	if g.DeadPeer != nil {
+		dpd := []string{"dead-peer-detection"}
+		if g.DeadPeer.Action != "" {
+			leaf(string(g.DeadPeer.Action), append(dpd, "action")...)
+		}
+		if g.DeadPeer.Interval > 0 {
+			leaf(strconv.Itoa(g.DeadPeer.Interval), append(dpd, "interval")...)
+		}
+		if g.DeadPeer.Timeout > 0 {
+			leaf(strconv.Itoa(g.DeadPeer.Timeout), append(dpd, "timeout")...)
+		}
+	}
+	for _, p := range g.Proposals {
+		if p.Number < 1 || p.Number > 65535 {
+			return nil, fmt.Errorf("ike-group %q proposal number %d out of range", g.Name, p.Number)
+		}
+		pb := []string{"proposal", strconv.Itoa(p.Number)}
+		leaf(p.Encryption, append(pb, "encryption")...)
+		leaf(p.Hash, append(pb, "hash")...)
+		leaf(p.DHGroup, append(pb, "dh-group")...)
+		leaf(p.PRF, append(pb, "prf")...)
+	}
+	return ops, nil
+}
+
+func DeleteIKEGroupOps(name string) []vyos.ConfigureOp {
+	return []vyos.ConfigureOp{{Op: vyos.OpDelete, Path: []string{"vpn", "ipsec", "ike-group", name}}}
+}
+
+// --- Encode: ESP group -----------------------------------------------------
+
+func ESPGroupOps(g model.ESPGroup) ([]vyos.ConfigureOp, error) {
+	if g.Name == "" {
+		return nil, fmt.Errorf("esp-group name required")
+	}
+	if len(g.Proposals) == 0 {
+		return nil, fmt.Errorf("esp-group %q: at least one proposal required", g.Name)
+	}
+	base := []string{"vpn", "ipsec", "esp-group", g.Name}
+	var ops []vyos.ConfigureOp
+	leaf := func(val string, keys ...string) {
+		if val != "" {
+			ops = append(ops, vyos.ConfigureOp{Op: vyos.OpSet, Path: joinPath(base, keys...), Value: val})
+		}
+	}
+	if g.Lifetime > 0 {
+		leaf(strconv.Itoa(g.Lifetime), "lifetime")
+	}
+	if g.Mode != "" {
+		leaf(string(g.Mode), "mode")
+	}
+	leaf(g.PFS, "pfs")
+	for _, p := range g.Proposals {
+		if p.Number < 1 || p.Number > 65535 {
+			return nil, fmt.Errorf("esp-group %q proposal number %d out of range", g.Name, p.Number)
+		}
+		pb := []string{"proposal", strconv.Itoa(p.Number)}
+		leaf(p.Encryption, append(pb, "encryption")...)
+		leaf(p.Hash, append(pb, "hash")...)
+	}
+	return ops, nil
+}
+
+func DeleteESPGroupOps(name string) []vyos.ConfigureOp {
+	return []vyos.ConfigureOp{{Op: vyos.OpDelete, Path: []string{"vpn", "ipsec", "esp-group", name}}}
+}
+
+// --- Encode: Peer + tunnels ------------------------------------------------
+
+func PeerOps(p model.Peer) ([]vyos.ConfigureOp, error) {
+	if p.Name == "" {
+		return nil, fmt.Errorf("peer name required")
+	}
+	if p.RemoteAddress == "" {
+		return nil, fmt.Errorf("peer %q: remote_address required", p.Name)
+	}
+	if p.IKEGroup == "" {
+		return nil, fmt.Errorf("peer %q: ike_group required", p.Name)
+	}
+	if p.Authentication.Mode == "" {
+		return nil, fmt.Errorf("peer %q: authentication.mode required", p.Name)
+	}
+
+	base := []string{"vpn", "ipsec", "site-to-site", "peer", p.Name}
+	var ops []vyos.ConfigureOp
+	leaf := func(val string, keys ...string) {
+		if val != "" {
+			ops = append(ops, vyos.ConfigureOp{Op: vyos.OpSet, Path: joinPath(base, keys...), Value: val})
+		}
+	}
+	flag := func(on bool, keys ...string) {
+		if on {
+			ops = append(ops, vyos.ConfigureOp{Op: vyos.OpSet, Path: joinPath(base, keys...)})
+		}
+	}
+	leaf(p.Description, "description")
+	flag(p.Disable, "disable")
+	leaf(p.RemoteAddress, "remote-address")
+	leaf(p.LocalAddress, "local-address")
+	leaf(p.IKEGroup, "ike-group")
+	leaf(p.DefaultESPGroup, "default-esp-group")
+	leaf(p.VTIInterface, "vti", "bind")
+
+	// Authentication block. PSK is the only mode whose secret we write in
+	// the clear here — the service layer sources it from the seal store,
+	// not from the JSON body the operator submits in plaintext.
+	auth := []string{"authentication"}
+	leaf(string(p.Authentication.Mode), append(auth, "mode")...)
+	if p.Authentication.Mode == model.AuthPSK && p.Authentication.PreSharedSecret != "" {
+		// VyOS 1.5+: PSKs live in `vpn ipsec authentication psk <name>`, not
+		// under the peer. The peer-name is reused as the psk-name (one PSK
+		// per peer is the common case for site-to-site).
+		pskBase := []string{"vpn", "ipsec", "authentication", "psk", p.Name}
+		ops = append(ops, vyos.ConfigureOp{
+			Op: vyos.OpSet, Path: append(append([]string{}, pskBase...), "secret"),
+			Value: p.Authentication.PreSharedSecret,
+		})
+		// VyOS 1.5 also wants `id` entries on the psk so charon knows which
+		// peer the secret applies to. We seed both the local and remote
+		// identities; either may match depending on direction. Empty values
+		// fall back to the gateway addresses, which is the common case.
+		if p.Authentication.LocalID != "" {
+			ops = append(ops, vyos.ConfigureOp{
+				Op: vyos.OpSet, Path: append(append([]string{}, pskBase...), "id"),
+				Value: p.Authentication.LocalID,
+			})
+		}
+		if p.Authentication.RemoteID != "" {
+			ops = append(ops, vyos.ConfigureOp{
+				Op: vyos.OpSet, Path: append(append([]string{}, pskBase...), "id"),
+				Value: p.Authentication.RemoteID,
+			})
+		}
+	}
+	if p.Authentication.Mode == model.AuthX509 {
+		leaf(p.Authentication.X509Certificate, append(auth, "x509", "certificate")...)
+		leaf(p.Authentication.X509CAName, append(auth, "x509", "ca-certificate")...)
+	}
+	if p.Authentication.IDType != "" {
+		leaf(string(p.Authentication.IDType), append(auth, "id")...)
+	}
+	leaf(p.Authentication.LocalID, append(auth, "local-id")...)
+	leaf(p.Authentication.RemoteID, append(auth, "remote-id")...)
+
+	// Tunnels.
+	for _, t := range p.Tunnels {
+		if t.Number < 0 || t.Number > 65535 {
+			return nil, fmt.Errorf("peer %q tunnel number %d out of range", p.Name, t.Number)
+		}
+		tb := []string{"tunnel", strconv.Itoa(t.Number)}
+		flag(t.Disable, append(tb, "disable")...)
+		leaf(t.Description, append(tb, "description")...)
+		leaf(t.ESPGroup, append(tb, "esp-group")...)
+		leaf(t.Protocol, append(tb, "protocol")...)
+		leaf(t.LocalSubnet, append(tb, "local", "prefix")...)
+		leaf(t.LocalPort, append(tb, "local", "port")...)
+		leaf(t.RemoteSubnet, append(tb, "remote", "prefix")...)
+		leaf(t.RemotePort, append(tb, "remote", "port")...)
+	}
+	return ops, nil
+}
+
+func DeletePeerOps(name string) []vyos.ConfigureOp {
+	return []vyos.ConfigureOp{{Op: vyos.OpDelete, Path: []string{"vpn", "ipsec", "site-to-site", "peer", name}}}
+}
+
+// --- Encode: globals -------------------------------------------------------
+
+func IPsecGlobalsOps(g model.IPsecGlobals) []vyos.ConfigureOp {
+	base := []string{"vpn", "ipsec"}
+	var ops []vyos.ConfigureOp
+	for _, iface := range g.Interfaces {
+		ops = append(ops, vyos.ConfigureOp{
+			Op:    vyos.OpSet,
+			Path:  joinPath(base, "ipsec-interfaces", "interface"),
+			Value: iface,
+		})
+	}
+	natt := "disable"
+	if g.NATTraversal {
+		natt = "enable"
+	}
+	ops = append(ops, vyos.ConfigureOp{
+		Op: vyos.OpSet, Path: joinPath(base, "nat-traversal"), Value: natt,
+	})
+	if g.LogLevel > 0 {
+		ops = append(ops, vyos.ConfigureOp{
+			Op: vyos.OpSet, Path: joinPath(base, "logging", "log-level"),
+			Value: strconv.Itoa(g.LogLevel),
+		})
+	}
+	return ops
+}
+
+// --- Decode: VyOS JSON → domain --------------------------------------------
+
+// DecodeIPsec parses the entire `vpn ipsec` config block. Caller is the
+// service layer's GetIPsecConfig — single retrieve, one decode pass.
+//
+// Handles the VyOS 1.5-rolling wrapping quirk the same way the existing
+// translators do: callers should already unwrap one level if their retrieve
+// came back wrapped (see translator.go DecodeRuleSetList for the pattern).
+func DecodeIPsec(raw json.RawMessage) (*model.IPsecConfig, error) {
+	cfg := &model.IPsecConfig{}
+	if len(raw) == 0 || string(raw) == "null" {
+		return cfg, nil
+	}
+	var tree map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		return nil, fmt.Errorf("decode ipsec: %w", err)
+	}
+
+	// globals
+	if v, ok := tree["nat-traversal"]; ok {
+		cfg.Globals.NATTraversal = unquote(v) == "enable"
+	}
+	if v, ok := tree["ipsec-interfaces"]; ok {
+		var inner map[string]json.RawMessage
+		if json.Unmarshal(v, &inner) == nil {
+			if iv, ok := inner["interface"]; ok {
+				_ = json.Unmarshal(iv, &cfg.Globals.Interfaces)
+				if cfg.Globals.Interfaces == nil {
+					var one string
+					if json.Unmarshal(iv, &one) == nil && one != "" {
+						cfg.Globals.Interfaces = []string{one}
+					}
+				}
+			}
+		}
+	}
+	if v, ok := tree["logging"]; ok {
+		var lg map[string]json.RawMessage
+		if json.Unmarshal(v, &lg) == nil {
+			if ll, ok := lg["log-level"]; ok {
+				cfg.Globals.LogLevel, _ = strconv.Atoi(unquote(ll))
+			}
+		}
+	}
+
+	if v, ok := tree["ike-group"]; ok {
+		cfg.IKEGroups = decodeIKEGroups(v)
+	}
+	if v, ok := tree["esp-group"]; ok {
+		cfg.ESPGroups = decodeESPGroups(v)
+	}
+	if v, ok := tree["site-to-site"]; ok {
+		var s2s map[string]json.RawMessage
+		if json.Unmarshal(v, &s2s) == nil {
+			if pv, ok := s2s["peer"]; ok {
+				cfg.Peers = decodePeers(pv)
+			}
+		}
+	}
+	return cfg, nil
+}
+
+func decodeIKEGroups(raw json.RawMessage) []model.IKEGroup {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	out := make([]model.IKEGroup, 0, len(m))
+	for name, body := range m {
+		g := model.IKEGroup{Name: name}
+		var tree map[string]json.RawMessage
+		if json.Unmarshal(body, &tree) != nil {
+			continue
+		}
+		g.Description = unquote(tree["description"])
+		g.IKEVersion = unquote(tree["key-exchange"])
+		g.Mode = model.IKEMode(unquote(tree["mode"]))
+		g.Lifetime, _ = strconv.Atoi(unquote(tree["lifetime"]))
+
+		if v, ok := tree["dead-peer-detection"]; ok {
+			var dpd map[string]json.RawMessage
+			if json.Unmarshal(v, &dpd) == nil {
+				d := &model.DPD{
+					Action: model.DPDAction(unquote(dpd["action"])),
+				}
+				d.Interval, _ = strconv.Atoi(unquote(dpd["interval"]))
+				d.Timeout, _ = strconv.Atoi(unquote(dpd["timeout"]))
+				g.DeadPeer = d
+			}
+		}
+
+		if v, ok := tree["proposal"]; ok {
+			var pmap map[string]json.RawMessage
+			if json.Unmarshal(v, &pmap) == nil {
+				for numStr, body := range pmap {
+					n, err := strconv.Atoi(numStr)
+					if err != nil {
+						continue
+					}
+					var pt map[string]json.RawMessage
+					if json.Unmarshal(body, &pt) != nil {
+						continue
+					}
+					g.Proposals = append(g.Proposals, model.IKEProposal{
+						Number:     n,
+						Encryption: unquote(pt["encryption"]),
+						Hash:       unquote(pt["hash"]),
+						DHGroup:    unquote(pt["dh-group"]),
+						PRF:        unquote(pt["prf"]),
+					})
+				}
+				sort.Slice(g.Proposals, func(i, j int) bool { return g.Proposals[i].Number < g.Proposals[j].Number })
+			}
+		}
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func decodeESPGroups(raw json.RawMessage) []model.ESPGroup {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	out := make([]model.ESPGroup, 0, len(m))
+	for name, body := range m {
+		g := model.ESPGroup{Name: name}
+		var tree map[string]json.RawMessage
+		if json.Unmarshal(body, &tree) != nil {
+			continue
+		}
+		g.Description = unquote(tree["description"])
+		g.Mode = model.ESPMode(unquote(tree["mode"]))
+		g.PFS = unquote(tree["pfs"])
+		g.Lifetime, _ = strconv.Atoi(unquote(tree["lifetime"]))
+		if v, ok := tree["proposal"]; ok {
+			var pmap map[string]json.RawMessage
+			if json.Unmarshal(v, &pmap) == nil {
+				for numStr, body := range pmap {
+					n, err := strconv.Atoi(numStr)
+					if err != nil {
+						continue
+					}
+					var pt map[string]json.RawMessage
+					if json.Unmarshal(body, &pt) != nil {
+						continue
+					}
+					g.Proposals = append(g.Proposals, model.ESPProposal{
+						Number:     n,
+						Encryption: unquote(pt["encryption"]),
+						Hash:       unquote(pt["hash"]),
+					})
+				}
+				sort.Slice(g.Proposals, func(i, j int) bool { return g.Proposals[i].Number < g.Proposals[j].Number })
+			}
+		}
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func decodePeers(raw json.RawMessage) []model.Peer {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	out := make([]model.Peer, 0, len(m))
+	for name, body := range m {
+		p := model.Peer{Name: name}
+		var tree map[string]json.RawMessage
+		if json.Unmarshal(body, &tree) != nil {
+			continue
+		}
+		p.Description = unquote(tree["description"])
+		_, p.Disable = tree["disable"]
+		p.RemoteAddress = unquote(tree["remote-address"])
+		p.LocalAddress = unquote(tree["local-address"])
+		p.IKEGroup = unquote(tree["ike-group"])
+		p.DefaultESPGroup = unquote(tree["default-esp-group"])
+
+		if v, ok := tree["authentication"]; ok {
+			var at map[string]json.RawMessage
+			if json.Unmarshal(v, &at) == nil {
+				p.Authentication.Mode = model.AuthMode(unquote(at["mode"]))
+				// PSK is intentionally NOT decoded — never round-trip secrets back
+				// to the UI in cleartext. The service layer surfaces a sentinel
+				// like "(stored)" so the UI knows one is set without leaking it.
+				p.Authentication.LocalID = unquote(at["local-id"])
+				p.Authentication.RemoteID = unquote(at["remote-id"])
+				p.Authentication.IDType = model.IDType(unquote(at["id"]))
+				if x, ok := at["x509"]; ok {
+					var xt map[string]json.RawMessage
+					if json.Unmarshal(x, &xt) == nil {
+						p.Authentication.X509Certificate = unquote(xt["certificate"])
+						p.Authentication.X509CAName = unquote(xt["ca-certificate"])
+					}
+				}
+			}
+		}
+		if v, ok := tree["tunnel"]; ok {
+			var tmap map[string]json.RawMessage
+			if json.Unmarshal(v, &tmap) == nil {
+				for numStr, body := range tmap {
+					n, err := strconv.Atoi(numStr)
+					if err != nil {
+						continue
+					}
+					var tt map[string]json.RawMessage
+					if json.Unmarshal(body, &tt) != nil {
+						continue
+					}
+					t := model.Tunnel{Number: n}
+					_, t.Disable = tt["disable"]
+					t.Description = unquote(tt["description"])
+					t.ESPGroup = unquote(tt["esp-group"])
+					t.Protocol = unquote(tt["protocol"])
+					if lv, ok := tt["local"]; ok {
+						var lt map[string]json.RawMessage
+						if json.Unmarshal(lv, &lt) == nil {
+							t.LocalSubnet = unquote(lt["prefix"])
+							t.LocalPort = unquote(lt["port"])
+						}
+					}
+					if rv, ok := tt["remote"]; ok {
+						var rt map[string]json.RawMessage
+						if json.Unmarshal(rv, &rt) == nil {
+							t.RemoteSubnet = unquote(rt["prefix"])
+							t.RemotePort = unquote(rt["port"])
+						}
+					}
+					p.Tunnels = append(p.Tunnels, t)
+				}
+				sort.Slice(p.Tunnels, func(i, j int) bool { return p.Tunnels[i].Number < p.Tunnels[j].Number })
+			}
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
