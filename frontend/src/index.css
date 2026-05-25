@@ -657,3 +657,139 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
 .insight .ic { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 11px;
   background: var(--bg-subtle); color: var(--ink-muted); }
 .insight .ic.ok { color: var(--ok); }
+
+
+/* ============================================================
+   FIREWALL REDESIGN  —  appended to index.css
+   KPI tiles + horizontal chain-flow diagram + rules pager.
+   ============================================================ */
+.fw-kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 1300px) { .fw-kpi-row { grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); } }
+.fw-kpi {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 50%), var(--bg-raised);
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.fw-kpi-icon {
+  width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+  font-size: 15px; background: var(--bg-subtle); border: 1px solid var(--line);
+  color: var(--ink-muted); margin-bottom: 6px;
+}
+.fw-kpi.ok     .fw-kpi-icon { color: var(--ok);     border-color: var(--ok); box-shadow: 0 0 10px rgba(43,224,166,.2); }
+.fw-kpi.danger .fw-kpi-icon { color: var(--danger); border-color: var(--danger); }
+.fw-kpi.warn   .fw-kpi-icon { color: var(--warn-ink); border-color: var(--warn-ink); }
+.fw-kpi.muted  .fw-kpi-icon { color: #9b6fe6; border-color: #5a3a8a; }
+.fw-kpi-value { font-size: 24px; font-weight: 700; line-height: 1.05; }
+.fw-kpi.ok .fw-kpi-value { color: var(--ok); }
+.fw-kpi.danger .fw-kpi-value { color: var(--danger); }
+.fw-kpi-label { font-size: 12px; color: var(--ink); font-weight: 500; margin-top: 2px; }
+.fw-kpi-sub { font-size: 11px; color: var(--ink-faint); }
+
+/* Chain-flow diagram */
+.fw-chains { display: flex; align-items: center; gap: 0; padding: 18px 14px; overflow-x: auto; }
+.fw-chain-wrap { display: flex; align-items: center; flex: none; }
+.fw-chain {
+  width: 190px; border-radius: 10px; padding: 14px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg-subtle);
+  transition: border-color .15s, box-shadow .15s, transform .1s;
+}
+.fw-chain:hover { transform: translateY(-2px); }
+.fw-chain.accept { border-left: 3px solid var(--ok); }
+.fw-chain.accept:hover { border-color: var(--ok); box-shadow: 0 0 14px rgba(43,224,166,.15); }
+.fw-chain.drop { border-left: 3px solid var(--danger); }
+.fw-chain.drop:hover { border-color: var(--danger); box-shadow: 0 0 14px rgba(255,92,87,.15); }
+.fw-chain-name { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.fw-chain-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.fw-chain-del {
+  border: 0; background: transparent; color: var(--ink-faint); cursor: pointer;
+  font-size: 12px; padding: 2px 4px; border-radius: 4px; line-height: 1; margin: -2px -2px 0 0;
+}
+.fw-chain-del:hover { color: var(--danger); background: var(--danger-soft); }
+.fw-chain-del:disabled { opacity: 0.4; cursor: not-allowed; }
+.fw-chain-foot { font-size: 11px; color: var(--ink-faint); margin-top: 10px; }
+.fw-chain-foot .mono { color: var(--ink-muted); font-size: 12px; }
+.fw-chain-count {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 64px; padding: 0 8px; flex: none;
+}
+.fw-chain-count .mono { font-size: 20px; font-weight: 600; color: var(--ink); }
+.fw-chain-count .dim { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.fw-chain-arrow { color: var(--ink-faint); font-size: 16px; padding: 0 4px; flex: none; }
+
+/* Rules pager */
+.fw-pager {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-top: 1px solid var(--line); font-size: 12px;
+}
+
+
+/* ============================================================
+   GROUPS REDESIGN  —  appended to index.css
+   KPI tiles + per-type group cards (with real usage) + usage
+   donut + most-used list. No per-group sparklines (no data).
+   ============================================================ */
+.grp-kpi-row { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 1300px) { .grp-kpi-row { grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); } }
+.grp-kpi {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 50%), var(--bg-raised);
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.grp-kpi-icon {
+  width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+  font-size: 15px; background: var(--bg-subtle); border: 1px solid var(--line);
+  color: var(--ink-muted); margin-bottom: 8px;
+}
+.grp-kpi.ok    .grp-kpi-icon { color: var(--ok);     border-color: var(--ok); box-shadow: 0 0 10px rgba(43,224,166,.2); }
+.grp-kpi.warn  .grp-kpi-icon { color: var(--warn-ink); border-color: var(--warn-ink); }
+.grp-kpi.muted .grp-kpi-icon { color: #9b6fe6; border-color: #5a3a8a; }
+.grp-kpi.brand .grp-kpi-icon { color: var(--brand); border-color: var(--brand); }
+.grp-kpi-value { font-size: 24px; font-weight: 700; line-height: 1.05; }
+.grp-kpi.ok .grp-kpi-value { color: var(--ok); }
+.grp-kpi-label { font-size: 12px; color: var(--ink); font-weight: 500; margin-top: 2px; }
+.grp-kpi-sub { font-size: 11px; color: var(--ink-faint); }
+
+/* Two-column grid of type cards + side cards */
+.grp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 1000px) { .grp-grid { grid-template-columns: 1fr; } }
+
+.grp-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--bg-raised);
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+}
+.grp-card.ok    { border-top: 2px solid var(--ok); }
+.grp-card.muted { border-top: 2px solid #9b6fe6; }
+.grp-card.warn  { border-top: 2px solid var(--warn-ink); }
+.grp-card.brand { border-top: 2px solid var(--brand); }
+.grp-card-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.grp-card-title { font-size: 13px; font-weight: 600; }
+.grp-card-count { font-size: 10px; font-family: var(--font-mono); color: var(--ink-muted);
+  background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; }
+.grp-card-icon { margin-left: auto; font-size: 16px; color: var(--ink-faint); }
+
+.grp-tbl { font-size: 12px; }
+.grp-tbl thead th { padding: 6px 14px; }
+.grp-tbl tbody td { padding: 7px 14px; }
+
+.grp-empty { padding: 26px 14px; text-align: center; color: var(--ink-muted); }
+.grp-empty-icon {
+  width: 44px; height: 44px; border-radius: 12px; margin: 0 auto 10px;
+  display: grid; place-items: center; font-size: 20px;
+  background: var(--bg-subtle); border: 1px solid var(--line); color: var(--ink-faint);
+}
+
+/* Side cards (donut + most-used) sit in the same grid */
+.grp-side-card {
+  background: var(--bg-raised); border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+}
+.side-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+.donut-wrap { display: flex; align-items: center; gap: 16px; }
+.donut-legend { font-size: 11px; color: var(--ink-muted); display: flex; flex-direction: column; gap: 8px; }
+.lg { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+
+.grp-mostused { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.grp-mostused li { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.grp-mostused li:last-child { border-bottom: 0; }
+.grp-mostused .rank { color: var(--ink-faint); font-size: 12px; width: 16px; }
+.grp-mostused .nm { flex: 1; }
+.grp-mostused .ru { color: var(--ink-muted); }
