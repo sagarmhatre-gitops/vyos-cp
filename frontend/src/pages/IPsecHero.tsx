@@ -1,15 +1,14 @@
 import type { SAStatus, IKEGroup, ESPGroup, Peer } from '../lib/api'
 
-// IPsecHero — the live topology + real-telemetry hero for the IPsec page.
+// IPsecHero — live topology + real-telemetry hero for the IPsec page.
 //
 // Every value shown is REAL, sourced from data the page already fetches:
-//   - nodes/IPs:        peer.local_address / peer.remote_address
-//   - link live state:  sa.state === 'up' (the glow + flow animate only when up)
-//   - crypto string:    derived from the IKE group + ESP group the peer references
+//   - node cards/IPs:   peer.local_address / peer.remote_address
+//   - link live state:  sa.state === 'up' (glow + flow animate only when up)
+//   - crypto string:    derived from the IKE + ESP groups the peer references
 //   - stats strip:      sa.uptime_sec, bytes_in/out, local_net/remote_net
-//   - rekey:            NOT shown unless present — we don't fabricate it
 //
-// No latency / jitter / packet-loss / security-score: the backend does not
+// No latency / jitter / packet-loss / health-score: the backend does not
 // collect those for tunnels, so they are intentionally absent rather than faked.
 
 function fmtBytes(n?: number): string {
@@ -29,7 +28,6 @@ function fmtUptime(s?: number): string {
   return `${h}h ${m % 60}m`
 }
 
-// Build a human crypto string from the groups the peer references.
 function cryptoString(peer: Peer | undefined, ike?: IKEGroup, esp?: ESPGroup): string {
   const parts: string[] = []
   const ikeP = ike?.proposals?.[0]
@@ -46,34 +44,50 @@ export default function IPsecHero({
   peer, sa, ike, esp,
 }: {
   peer?: Peer
-  sa?: SAStatus            // the live SA for this peer's first tunnel, if any
+  sa?: SAStatus
   ike?: IKEGroup
   esp?: ESPGroup
 }) {
   const up = sa?.state === 'up'
   const linkClass = up ? 'topo-link up' : 'topo-link'
-  const nodeClass = up ? 'topo-node live' : 'topo-node'
 
   return (
     <div className="ipsec-hero">
-      <div className="ipsec-hero-grid">
-        <div className={nodeClass}>
-          <div className="icon">▤</div>
-          <div className="label">VyOS Gateway</div>
-          <div className="sub">{peer?.local_address || 'any'}</div>
+      {/* faint map dot-grid backdrop */}
+      <div className="topo-bg" aria-hidden="true" />
+
+      <div className="topo-row">
+        {/* Gateway node card */}
+        <div className={'topo-card' + (up ? ' live' : '')}>
+          <div className="topo-card-icon">▤</div>
+          <div className="topo-card-body">
+            <div className="topo-card-name">VyOS Gateway</div>
+            <div className="topo-card-ip mono">{peer?.local_address || 'any'}</div>
+          </div>
+          <span className="topo-pill local">Local</span>
         </div>
 
+        {/* Connected link */}
         <div className={linkClass}>
           <div className="track" />
           <div className="flow" /><div className="flow" /><div className="flow" />
-          <div className="lock">{up ? '🔒' : '🔓'}</div>
-          <div className="crypto-cap">{cryptoString(peer, ike, esp)}</div>
+          <div className="lock-ring">
+            <div className="lock">{up ? '🔒' : '🔓'}</div>
+          </div>
+          <div className="crypto-cap mono">{cryptoString(peer, ike, esp)}</div>
+          <div className={'link-state ' + (up ? 'up' : 'down')}>
+            {up ? 'ENCRYPTED TUNNEL' : 'TUNNEL DOWN'}
+          </div>
         </div>
 
-        <div className={nodeClass}>
-          <div className="icon">▢</div>
-          <div className="label">{peer?.name || 'peer'}</div>
-          <div className="sub">{peer?.remote_address || '—'}</div>
+        {/* Peer node card */}
+        <div className={'topo-card' + (up ? ' live' : '')}>
+          <div className="topo-card-icon">▢</div>
+          <div className="topo-card-body">
+            <div className="topo-card-name">{peer?.name || 'peer'}</div>
+            <div className="topo-card-ip mono">{peer?.remote_address || '—'}</div>
+          </div>
+          <span className="topo-pill remote">Remote</span>
         </div>
       </div>
 

@@ -472,34 +472,63 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
   margin-bottom: 16px;
   overflow: hidden;
 }
-.ipsec-hero-grid {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 0;
+/* ============================================================
+   IPSEC TOPOLOGY REBUILD — replaces .ipsec-hero-grid/.topo-node/.topo-link
+   Node CARDS joined by an edge-to-edge connected link, over a faint
+   map dot-grid. Matches the reference's paired/connected structure.
+   ============================================================ */
+.ipsec-hero { position: relative; }
+.topo-bg {
+  position: absolute; inset: 0; border-radius: var(--radius-lg); pointer-events: none;
+  background-image: radial-gradient(rgba(138,153,173,0.12) 1px, transparent 1px);
+  background-size: 18px 18px; opacity: 0.5;
+  -webkit-mask-image: radial-gradient(ellipse 70% 80% at 50% 50%, #000 30%, transparent 75%);
+          mask-image: radial-gradient(ellipse 70% 80% at 50% 50%, #000 30%, transparent 75%);
 }
-.topo-node {
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  text-align: center;
-}
-.topo-node .icon {
-  width: 64px; height: 64px; border-radius: 16px;
-  display: grid; place-items: center;
-  background: linear-gradient(160deg, var(--bg-subtle), var(--bg));
-  border: 1px solid var(--line-strong);
-  font-size: 26px; color: var(--brand-ink);
-}
-.topo-node.live .icon { border-color: var(--ok); box-shadow: var(--glow-ok); color: var(--ok); }
-.topo-node .label { font-size: 13px; font-weight: 600; color: var(--ink); }
-.topo-node .sub { font-size: 11px; color: var(--ink-muted); font-family: var(--font-mono); }
 
-/* The encrypted link: a track with flowing particles when up. */
-.topo-link { position: relative; min-width: 0; height: 64px; display: grid; place-items: center; }
+.topo-row {
+  position: relative; z-index: 1;
+  display: grid; grid-template-columns: minmax(180px, 240px) 1fr minmax(180px, 240px);
+  align-items: center; gap: 0;
+}
+
+/* Node cards */
+.topo-card {
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
+  background: linear-gradient(160deg, var(--bg-subtle), var(--bg));
+  border: 1px solid var(--line-strong); border-radius: 14px;
+  padding: 16px; min-height: 84px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.topo-card.live { border-color: var(--ok); box-shadow: 0 0 18px rgba(43,224,166,0.18); }
+.topo-card-icon {
+  width: 48px; height: 48px; border-radius: 12px; flex: none;
+  display: grid; place-items: center; font-size: 22px;
+  background: var(--bg-raised); border: 1px solid var(--line-strong); color: var(--brand-ink);
+}
+.topo-card.live .topo-card-icon { border-color: var(--ok); color: var(--ok); box-shadow: var(--glow-ok); }
+.topo-card-body { min-width: 0; flex: 1; }
+.topo-card-name { font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topo-card-ip { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+.topo-pill {
+  position: absolute; top: 10px; right: 10px;
+  font-size: 9.5px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line);
+}
+.topo-pill.local  { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.topo-pill.remote { color: var(--brand-ink); border-color: var(--brand); background: var(--brand-soft); }
+
+/* The connected link fills the middle column, edge-to-edge into both cards */
+.topo-link { position: relative; height: 84px; display: grid; place-items: center; }
 .topo-link .track {
-  position: absolute; left: -22px; right: -22px; top: 50%; height: 2px;
+  position: absolute; left: -16px; right: -16px; top: 50%; height: 2px;
   background: var(--line-strong); transform: translateY(-50%);
 }
-.topo-link.up .track { background: linear-gradient(90deg, var(--ok), rgba(43,224,166,0.5), var(--ok)); box-shadow: var(--glow-ok); }
+.topo-link.up .track {
+  background: linear-gradient(90deg, var(--ok), rgba(43,224,166,0.5), var(--ok));
+  box-shadow: var(--glow-ok);
+}
 .topo-link .flow {
   position: absolute; top: 50%; left: 0; transform: translateY(-50%);
   width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
@@ -510,22 +539,40 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
 .topo-link.up .flow:nth-child(4) { animation-delay: 1.2s; }
 @keyframes topo-flow {
   0%   { left: 2%;  opacity: 0; }
-  15%  { opacity: 1; }
-  85%  { opacity: 1; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
   100% { left: 98%; opacity: 0; }
 }
-.topo-link .lock {
+
+/* Glowing ring around the centered lock */
+.topo-link .lock-ring {
   position: relative; z-index: 2;
-  width: 38px; height: 38px; border-radius: 50%;
+  width: 54px; height: 54px; border-radius: 50%;
   display: grid; place-items: center;
-  background: var(--bg-raised); border: 1px solid var(--line-strong);
-  font-size: 16px; color: var(--ink-muted);
+  background: var(--bg-raised); border: 2px solid var(--line-strong);
 }
-.topo-link.up .lock { border-color: var(--ok); color: var(--ok); box-shadow: var(--glow-ok); }
+.topo-link.up .lock-ring { border-color: var(--ok); box-shadow: var(--glow-ok); }
+.topo-link .lock {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 16px; color: var(--ink-muted);
+}
+.topo-link.up .lock { color: var(--ok); }
 .topo-link .crypto-cap {
-  position: absolute; top: calc(50% + 26px); left: 50%; transform: translateX(-50%);
-  font-size: 10.5px; font-family: var(--font-mono); color: var(--ink-muted);
+  position: absolute; top: calc(50% + 34px); left: 50%; transform: translateX(-50%);
+  font-size: 10.5px; color: var(--ink-muted); white-space: nowrap;
+}
+.topo-link .link-state {
+  position: absolute; top: calc(50% - 52px); left: 50%; transform: translateX(-50%);
+  font-size: 10px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em;
   white-space: nowrap;
+}
+.topo-link .link-state.up { color: var(--ok); }
+.topo-link .link-state.down { color: var(--ink-faint); }
+
+@media (max-width: 760px) {
+  .topo-row { grid-template-columns: 1fr; gap: 12px; }
+  .topo-link { height: 60px; }
+  .topo-link .track { left: 50%; right: auto; top: -8px; bottom: -8px; width: 2px; height: auto; transform: translateX(-50%); }
 }
 
 /* Stat strip under the topology — REAL fields only. */
