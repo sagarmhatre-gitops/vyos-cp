@@ -840,3 +840,41 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
 .grp-mostused .rank { color: var(--ink-faint); font-size: 12px; width: 16px; }
 .grp-mostused .nm { flex: 1; }
 .grp-mostused .ru { color: var(--ink-muted); }
+
+
+/* ============================================================
+   IPSEC PANELS — Crypto Parameters + Activity Feed
+   Appended to index.css. Real-data panels, side by side.
+   ============================================================ */
+.ipsec-panels-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+@media (max-width: 900px) { .ipsec-panels-row { grid-template-columns: 1fr; } }
+
+.ipsec-panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--bg-raised);
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+}
+.ipsec-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.ipsec-panel-title { font-size: 13px; font-weight: 600; }
+
+/* Crypto */
+.crypto-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 560px) { .crypto-cols { grid-template-columns: 1fr; } }
+.crypto-phase { font-size: 12px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.crypto-phase .dim { font-weight: 400; }
+.crypto-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.crypto-row:last-child { border-bottom: 0; }
+.crypto-k { font-size: 12px; color: var(--ink-muted); }
+.crypto-v { font-size: 12px; color: var(--ink); }
+
+/* Activity feed */
+.feed-list { list-style: none; margin: 0; padding: 0; }
+.feed-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.feed-item:last-child { border-bottom: 0; }
+.feed-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
+.feed-dot.ok  { background: var(--ok); box-shadow: 0 0 6px rgba(43,224,166,0.5); }
+.feed-dot.err { background: var(--danger); }
+.feed-body { min-width: 0; flex: 1; }
+.feed-title { font-size: 12.5px; color: var(--ink); word-break: break-word; }
+.feed-meta { font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; }
+.feed-fail { color: var(--danger); }
+.feed-empty { font-size: 12px; color: var(--ink-muted); padding: 14px 0; }

@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { api, IKEGroup, ESPGroup, Peer, Tunnel } from '../lib/api'
 import TunnelListEditor from './TunnelListEditor'
 import IPsecHero from './IPsecHero'
+import { CryptoParameters, ActivityFeed } from './IPsecPanels'
 import { DeviceHeader } from '../components/DeviceHeader'
 import { Modal } from '../components/Modal'
 
@@ -44,6 +45,11 @@ export function IPsec() {
 
   const refetch = () => qc.invalidateQueries({ queryKey: ['ipsec', id] })
 
+  const auditQ = useQuery({
+    queryKey: ['audit', id],
+    queryFn: () => api.listAudit(id!, 100),
+    enabled: !!id,
+  })
   const delPeer = useMutation({ mutationFn: (name: string) => api.deletePeer(id!, name), onSuccess: refetch })
   const delIKE  = useMutation({ mutationFn: (name: string) => api.deleteIKEGroup(id!, name), onSuccess: refetch })
   const delESP  = useMutation({ mutationFn: (name: string) => api.deleteESPGroup(id!, name), onSuccess: refetch })
@@ -139,7 +145,15 @@ export function IPsec() {
             const heroSA = sas.find(s => s.peer === heroPeer.name)
             const heroIKE = (cfg.ike_groups || []).find(g => g.name === heroPeer.ike_group)
             const heroESP = (cfg.esp_groups || []).find(g => g.name === heroPeer.default_esp_group)
-            return <IPsecHero peer={heroPeer} sa={heroSA} ike={heroIKE} esp={heroESP} />
+            return (
+              <>
+                <IPsecHero peer={heroPeer} sa={heroSA} ike={heroIKE} esp={heroESP} />
+                <div className="ipsec-panels-row">
+                  <CryptoParameters ike={heroIKE} esp={heroESP} />
+                  <ActivityFeed entries={auditQ.data || []} loading={auditQ.isLoading} />
+                </div>
+              </>
+            )
           })()}
           {/* Peers — primary content */}
           <div className="card" style={{ marginBottom: 16 }}>
