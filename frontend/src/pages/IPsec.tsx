@@ -82,6 +82,7 @@ export function IPsec() {
   const sas = statusQ.data || []
   const peerCount = cfg?.peers?.length ?? 0
   const activeCount = sas.filter(s => s.state === 'up').length
+  const [profilesOpen, setProfilesOpen] = useState(false)
 
   // Build "used by" maps so each crypto profile can show which peers reference it.
   // The Crypto profiles section is where new operators get confused — they create
@@ -160,8 +161,13 @@ export function IPsec() {
             <div className="card-head">
               <div>
                 <div className="card-title">Peers</div>
-                <div className="card-sub">Site-to-site tunnels</div>
+                <div className="card-sub">Site-to-site tunnels · live telemetry refreshes every 10s</div>
               </div>
+              {peerCount > 0 && (
+                <div className="dim" style={{ fontSize: 11 }}>
+                  {activeCount} of {peerCount} {peerCount === 1 ? 'peer' : 'peers'} up
+                </div>
+              )}
             </div>
             {peerCount === 0 ? (
               <EmptyState
@@ -175,11 +181,17 @@ export function IPsec() {
                 <thead><tr>
                   <th>Name</th><th>Remote</th><th>Local</th>
                   <th>IKE / ESP</th><th>Auth</th><th>Tunnels</th>
+                  <th>State</th><th className="right">In / Out</th><th className="right">Uptime</th>
                   <th className="right">Actions</th>
                 </tr></thead>
                 <tbody>
                   {(cfg.peers || []).map(p => {
-                    const sa = sas.find(s => s.peer === p.name)
+                    const peerSAs = sas.filter(s => s.peer === p.name)
+                    const sa = peerSAs[0]
+                    const anyUp = peerSAs.some(s => s.state === 'up')
+                    const sumIn = peerSAs.reduce((a, s) => a + (s.bytes_in || 0), 0)
+                    const sumOut = peerSAs.reduce((a, s) => a + (s.bytes_out || 0), 0)
+                    const maxUp = peerSAs.reduce((a, s) => Math.max(a, s.uptime_sec || 0), 0)
                     return (
                       <tr key={p.name}>
                         <td>
@@ -206,6 +218,16 @@ export function IPsec() {
                                 </div>
                               ))}
                         </td>
+                        <td>
+                          {peerSAs.length === 0
+                            ? <span className="dim" style={{ fontSize: 11 }}>—</span>
+                            : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                                <span className={'live-dot ' + (anyUp ? 'up' : 'down')} />
+                                <span className={'mono ' + (anyUp ? 'signal-up' : 'signal-down')}>{anyUp ? 'up' : 'down'}</span>
+                              </span>}
+                        </td>
+                        <td className="mono right" style={{ fontSize: 11 }}>{peerSAs.length ? `${fmtBytes(sumIn)} / ${fmtBytes(sumOut)}` : '—'}</td>
+                        <td className="mono right dim" style={{ fontSize: 11 }}>{peerSAs.length ? fmtUptime(maxUp) : '—'}</td>
                         <td className="right">
                           <button className="btn" style={miniBtn}
                             onClick={() => setEditingPeer(p)}>edit</button>
@@ -220,50 +242,6 @@ export function IPsec() {
               </table>
             )}
           </div>
-
-          {/* Active SAs — only show as a separate panel if peers exist */}
-          {peerCount > 0 && (
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-head">
-                <div>
-                  <div className="card-title">Active Security Associations</div>
-                  <div className="card-sub">Live telemetry · refreshes every 10s</div>
-                </div>
-                <div className="dim" style={{ fontSize: 11 }}>
-                  {activeCount} of {peerCount} {peerCount === 1 ? 'peer' : 'peers'} up
-                </div>
-              </div>
-              {sas.length === 0 ? (
-                <div style={{ padding: '16px 14px', color: 'var(--ink-muted)', fontSize: 12 }}>
-                  No active SAs. Tunnels will appear here once they negotiate successfully.
-                </div>
-              ) : (
-                <table className="tbl">
-                  <thead><tr>
-                    <th>Peer</th><th>Tunnel</th><th>State</th>
-                    <th>Local</th><th>Remote</th>
-                    <th className="right">In / Out</th>
-                    <th className="right">Uptime</th>
-                  </tr></thead>
-                  <tbody>
-                    {sas.map((s, i) => (
-                      <tr key={`${s.peer}-${s.tunnel}-${i}`}>
-                        <td className="mono">{s.peer}</td>
-                        <td className="mono dim">{s.tunnel}</td>
-                        <td>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><span className={'live-dot ' + (s.state === 'up' ? 'up' : 'down')} /><span className={'mono ' + (s.state === 'up' ? 'signal-up' : 'signal-down')}>{s.state}</span></span>
-                        </td>
-                        <td className="mono dim" style={{ fontSize: 11 }}>{s.local_net || '—'}</td>
-                        <td className="mono dim" style={{ fontSize: 11 }}>{s.remote_net || '—'}</td>
-                        <td className="mono right">{fmtBytes(s.bytes_in)} / {fmtBytes(s.bytes_out)}</td>
-                        <td className="mono right dim">{fmtUptime(s.uptime_sec)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
 
           {/* Crypto profiles — side-by-side, smaller. Reference data, lower in hierarchy. */}
           <div className="card" style={{ marginBottom: 16 }}>
