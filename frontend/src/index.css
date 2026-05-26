@@ -910,3 +910,87 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
 .topo-card.down .topo-card-icon { border-color: rgba(255,92,87,0.6); color: var(--danger-ink); }
 /* Remote pill stays blue, but when down dim it slightly so red reads as the signal */
 .topo-link.down .crypto-cap { opacity: 0.5; }
+
+
+/* ============================================================
+   NAT REDESIGN — appended to index.css
+   KPI tiles + flow diagram + type donut + SNAT/DNAT tables.
+   Real data only (no sparklines / statistics / conflicts).
+   ============================================================ */
+.nat-kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 900px) { .nat-kpi-row { grid-template-columns: 1fr; } }
+.nat-kpi { background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 50%), var(--bg-raised);
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 2px; }
+.nat-kpi-icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; font-size: 15px;
+  background: var(--bg-subtle); border: 1px solid var(--line); color: var(--ink-muted); margin-bottom: 8px; }
+.nat-kpi.brand .nat-kpi-icon { color: var(--brand-ink); border-color: var(--brand); }
+.nat-kpi.muted .nat-kpi-icon { color: #9b6fe6; border-color: #5a3a8a; }
+.nat-kpi-value { font-size: 24px; font-weight: 700; line-height: 1.05; }
+.nat-kpi-label { font-size: 12px; color: var(--ink); font-weight: 500; margin-top: 2px; }
+.nat-kpi-sub { font-size: 11px; color: var(--ink-faint); }
+
+.nat-mid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 16px; }
+@media (max-width: 1000px) { .nat-mid { grid-template-columns: 1fr; } }
+
+/* Flow diagram */
+.nat-flow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 22px 18px; }
+.nat-node { flex: 1; border-radius: 12px; padding: 16px 14px; text-align: center; border: 1px solid var(--line); }
+.nat-node.internal { background: var(--ok-soft); border-color: rgba(43,224,166,0.3); }
+.nat-node.gateway  { background: var(--brand-soft); border-color: rgba(46,143,230,0.4); }
+.nat-node.external { background: rgba(155,111,230,0.08); border-color: rgba(155,111,230,0.3); }
+.nat-node-title { font-size: 12.5px; font-weight: 600; margin-bottom: 8px; }
+.nat-node-ip { font-size: 11px; color: var(--ink-muted); line-height: 1.5; }
+.nat-arrow { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; padding: 0 4px; }
+.nat-arrow-count { font-size: 13px; font-weight: 700; font-family: var(--font-mono); color: var(--ink); }
+.nat-arrow-line { font-size: 18px; }
+.nat-arrow-line.snat { color: var(--brand); }
+.nat-arrow-line.dnat { color: #9b6fe6; }
+
+/* Donut */
+.nat-donut-wrap { display: flex; align-items: center; gap: 18px; padding: 16px; }
+.nat-legend { font-size: 12px; color: var(--ink-muted); display: flex; flex-direction: column; gap: 12px; }
+.nat-legend > div { display: flex; align-items: center; }
+.nat-legend .lg { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; }
+.nat-legend b { margin-left: auto; padding-left: 16px; color: var(--ink); }
+
+/* Tables */
+.nat-tables { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 1100px) { .nat-tables { grid-template-columns: 1fr; } }
+.nat-table.snat { border-top: 2px solid var(--brand); }
+.nat-table.dnat { border-top: 2px solid #9b6fe6; }
+.nat-count { font-size: 10px; font-family: var(--font-mono); color: var(--ink-muted);
+  background: var(--bg-subtle); border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; margin-left: 4px; }
+.nat-table .tbl thead th { padding: 7px 12px; font-size: 10px; }
+.nat-table .tbl td { padding: 7px 12px; }
+
+
+/* ============================================================
+   QOS REDESIGN — appended to index.css
+   KPI tiles (icon badges) + shaping flow diagram. Config only —
+   no live throughput/queue/efficiency (backend has no QoS stats).
+   ============================================================ */
+.qos-kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 900px) { .qos-kpi-row { grid-template-columns: 1fr; } }
+.qos-kpi { background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 50%), var(--bg-raised);
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; align-items: center; gap: 14px; }
+.qos-kpi-icon { width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; flex: none; }
+.qos-kpi-icon svg { width: 22px; height: 22px; }
+.qos-kpi.brand .qos-kpi-icon { background: var(--brand-soft); color: var(--brand-ink); }
+.qos-kpi.muted .qos-kpi-icon { background: rgba(155,111,230,0.12); color: #b18ce8; }
+.qos-kpi.ok    .qos-kpi-icon { background: var(--ok-soft); color: var(--ok); }
+.qos-kpi-value { font-size: 22px; font-weight: 700; line-height: 1; }
+.qos-kpi-value small { font-size: 13px; font-weight: 500; color: var(--ink-muted); margin-left: 3px; }
+.qos-kpi-label { font-size: 12px; color: var(--ink); margin-top: 3px; }
+.qos-kpi-sub { font-size: 11px; color: var(--ink-faint); }
+
+.qos-flow { display: flex; align-items: center; justify-content: center; padding: 24px 18px; }
+.qos-flow-node { border-radius: 12px; padding: 16px 18px; text-align: center; border: 1px solid var(--line); background: var(--bg-subtle); min-width: 150px; }
+.qos-flow-node.io .dim { font-size: 11px; }
+.qos-shaper { border: 1px solid rgba(155,111,230,0.4); background: linear-gradient(180deg, rgba(155,111,230,0.1), transparent);
+  border-radius: 14px; padding: 18px 24px; text-align: center; margin: 0 4px; min-width: 200px; }
+.qos-shaper-icon { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; margin: 0 auto 8px; background: rgba(155,111,230,0.15); color: #b18ce8; }
+.qos-shaper-icon svg { width: 22px; height: 22px; }
+.qos-shaper-name { font-size: 15px; font-weight: 600; }
+.qos-shaper-meta { font-size: 11px; color: var(--ink-muted); font-family: var(--font-mono); margin-top: 4px; }
+.qos-flow-arrow { color: var(--ink-faint); padding: 0 14px; flex: none; }
+.qos-flow-arrow svg { width: 40px; height: 14px; }
