@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api, TrafficPolicy, TrafficClass, ClassMatcher, QoSEngine, TrafficPolicyBinding, Interface } from '../lib/api'
 import { DeviceHeader } from '../components/DeviceHeader'
+import { QoSTraffic } from './QoSTraffic'
 import { QoSOverview } from './QoSOverview'
 
 export function QoS() {
@@ -93,6 +94,8 @@ export function QoS() {
       {bind.isError && <div className="err">Bind failed: {(bind.error as Error).message}</div>}
       {del.isError && <div className="err">Delete failed: {(del.error as Error).message}</div>}
       {unbind.isError && <div className="err">Unbind failed: {(unbind.error as Error).message}</div>}
+
+      <QoSTraffic deviceId={id!} policies={policies} />
 
       <QoSOverview policies={policies} bindings={bindingsQ.data || []} />
 
