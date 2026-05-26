@@ -69,7 +69,7 @@ function Shell({ user, onLogout }: { user: NonNullable<User>; onLogout: () => vo
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8">
               <path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z"/>
             </svg>
-            <span>vyos control plane</span>
+            <span>Vynetra-cp</span>
           </div>
         </div>
 

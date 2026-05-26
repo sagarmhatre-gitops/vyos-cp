@@ -61,7 +61,7 @@ export default function IPsecHero({
         <div className={'topo-card' + (up ? ' live' : '')}>
           <div className="topo-card-icon">▤</div>
           <div className="topo-card-body">
-            <div className="topo-card-name">VyOS Gateway</div>
+            <div className="topo-card-name">VPC Gateway</div>
             <div className="topo-card-ip mono">{peer?.local_address || 'any'}</div>
           </div>
           <span className="topo-pill local">Local</span>

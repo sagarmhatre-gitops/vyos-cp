@@ -522,7 +522,7 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
 /* The connected link fills the middle column, edge-to-edge into both cards */
 .topo-link { position: relative; height: 84px; display: grid; place-items: center; }
 .topo-link .track {
-  position: absolute; left: -16px; right: -16px; top: 50%; height: 2px;
+  position: absolute; left: 0; right: 0; top: 50%; height: 2px;
   background: var(--line-strong); transform: translateY(-50%);
 }
 .topo-link.up .track {
