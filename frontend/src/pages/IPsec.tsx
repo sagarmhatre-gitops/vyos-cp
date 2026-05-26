@@ -245,12 +245,14 @@ export function IPsec() {
 
           {/* Crypto profiles — side-by-side, smaller. Reference data, lower in hierarchy. */}
           <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-head">
+            <div className="card-head" style={{ cursor: 'pointer' }} onClick={() => setProfilesOpen(o => !o)}>
               <div>
                 <div className="card-title">Crypto profiles</div>
                 <div className="card-sub">Shared IKE (phase 1) and ESP (phase 2) parameters referenced by peers</div>
               </div>
+              <span className="dim mono" style={{ fontSize: 13 }}>{profilesOpen ? '▾' : '▸'}</span>
             </div>
+            {profilesOpen && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderTop: '1px solid var(--line)' }}>
               <div style={{ borderRight: '1px solid var(--line)' }}>
                 <div style={subHeaderStyle}>IKE groups (phase 1)</div>
@@ -324,6 +326,7 @@ export function IPsec() {
                 )}
               </div>
             </div>
+            )}
           </div>
         </>
       )}

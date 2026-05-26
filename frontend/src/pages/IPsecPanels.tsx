@@ -73,7 +73,7 @@ function relTime(iso: string): string {
 }
 
 export function ActivityFeed({ entries, loading }: { entries: AuditEntry[]; loading: boolean }) {
-  const recent = entries.slice(0, 8)
+  const recent = entries.slice(0, 4)
   return (
     <div className="ipsec-panel">
       <div className="ipsec-panel-head">
