@@ -870,11 +870,43 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
 .feed-list { list-style: none; margin: 0; padding: 0; }
 .feed-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .feed-item:last-child { border-bottom: 0; }
-.feed-dot { width: 8px; height: 8px; min-width: 8px; min-height: 8px; flex: 0 0 8px; border-radius: 50%; margin-top: 5px; align-self: flex-start; }
+.feed-dot { display: block; box-sizing: border-box; width: 8px; height: 8px; min-width: 8px; max-width: 8px; min-height: 8px; max-height: 8px; aspect-ratio: 1 / 1; flex: 0 0 8px; border-radius: 50%; margin-top: 6px; align-self: flex-start; padding: 0; border: 0; }
 .feed-dot.ok  { background: var(--ok); box-shadow: 0 0 6px rgba(43,224,166,0.5); }
-.feed-dot.err { background: var(--danger); }
+.feed-dot.err { background: var(--danger); box-shadow: 0 0 6px rgba(255,92,87,0.5); }
 .feed-body { min-width: 0; flex: 1; }
 .feed-title { font-size: 12.5px; color: var(--ink); word-break: break-word; }
 .feed-meta { font-size: 10.5px; color: var(--ink-faint); margin-top: 2px; }
 .feed-fail { color: var(--danger); }
 .feed-empty { font-size: 12px; color: var(--ink-muted); padding: 14px 0; }
+
+
+/* ============================================================
+   IPSEC TOPOLOGY — DOWN-STATE ALERT
+   Severed red dashed line + open red lock + warning icon when the
+   tunnel is down. Keyed off .topo-link.down / .topo-card.down.
+   ============================================================ */
+/* Severed dashed red track */
+.topo-link.down .track {
+  background: none;
+  border-top: 2px dashed var(--danger);
+  height: 0; box-shadow: none; opacity: 0.7;
+}
+/* Red lock ring, open lock */
+.topo-link.down .lock-ring {
+  border-color: var(--danger);
+  box-shadow: 0 0 12px rgba(255,92,87,0.45), 0 0 4px rgba(255,92,87,0.7);
+}
+.topo-link.down .lock { color: var(--danger); }
+/* TUNNEL DOWN label in red */
+.topo-link.down .link-state.down { color: var(--danger); font-weight: 600; }
+/* Warning icon sitting above the broken link, near the lock */
+.topo-warn {
+  position: absolute; top: calc(50% - 50px); left: calc(50% + 56px);
+  font-size: 16px; color: var(--danger);
+  filter: drop-shadow(0 0 4px rgba(255,92,87,0.6));
+}
+/* Node cards: red border when down (subtle — border only, no fill) */
+.topo-card.down { border-color: rgba(255,92,87,0.5); }
+.topo-card.down .topo-card-icon { border-color: rgba(255,92,87,0.6); color: var(--danger-ink); }
+/* Remote pill stays blue, but when down dim it slightly so red reads as the signal */
+.topo-link.down .crypto-cap { opacity: 0.5; }

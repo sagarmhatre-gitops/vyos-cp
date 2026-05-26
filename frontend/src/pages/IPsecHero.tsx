@@ -49,7 +49,7 @@ export default function IPsecHero({
   esp?: ESPGroup
 }) {
   const up = sa?.state === 'up'
-  const linkClass = up ? 'topo-link up' : 'topo-link'
+  const linkClass = up ? 'topo-link up' : 'topo-link down'
 
   return (
     <div className="ipsec-hero">
@@ -58,7 +58,7 @@ export default function IPsecHero({
 
       <div className="topo-row">
         {/* Gateway node card */}
-        <div className={'topo-card' + (up ? ' live' : '')}>
+        <div className={'topo-card' + (up ? ' live' : ' down')}>
           <div className="topo-card-icon">▤</div>
           <div className="topo-card-body">
             <div className="topo-card-name">VPC Gateway</div>
@@ -74,6 +74,7 @@ export default function IPsecHero({
           <div className="lock-ring">
             <div className="lock">{up ? '🔒' : '🔓'}</div>
           </div>
+          {!up && <div className="topo-warn" title="Tunnel down">⚠</div>}
           <div className="crypto-cap mono">{cryptoString(peer, ike, esp)}</div>
           <div className={'link-state ' + (up ? 'up' : 'down')}>
             {up ? 'ENCRYPTED TUNNEL' : 'TUNNEL DOWN'}
@@ -81,7 +82,7 @@ export default function IPsecHero({
         </div>
 
         {/* Peer node card */}
-        <div className={'topo-card' + (up ? ' live' : '')}>
+        <div className={'topo-card' + (up ? ' live' : ' down')}>
           <div className="topo-card-icon">▢</div>
           <div className="topo-card-body">
             <div className="topo-card-name">{peer?.name || 'peer'}</div>
