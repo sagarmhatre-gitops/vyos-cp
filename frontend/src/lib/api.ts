@@ -111,6 +111,17 @@ export type IfaceRate = {
   rx_pps: number; tx_pps: number;
 };
 
+export type UsageRollup = {
+  device_id: string;
+  scope: string;
+  period_type: string;
+  period_start: string;
+  rx_bytes: number;
+  tx_bytes: number;
+  had_reset: boolean;
+  source: string;
+};
+
 export type ThroughputSample = {
   ts: string;
   total: IfaceRate;
@@ -441,6 +452,16 @@ class API {
   }
   fleetThroughput() {
     return this.req<IfaceRate>(`/api/v1/fleet/throughput`);
+  }
+  deviceUsage(id: string, period: 'hour' | 'day' | 'month' = 'hour', hours = 24) {
+    return this.req<UsageRollup[]>(`/api/v1/devices/${id}/usage?period=${period}&hours=${hours}`);
+  }
+  deviceFlows(id: string, limit = 500) {
+    return this.req<Array<{
+      conntrack_id: string; protocol: string; state: string;
+      orig_src_ip: string; orig_src_port: string; orig_dst_ip: string; orig_dst_port: string;
+      reply_src_ip: string; reply_dst_ip: string; timeout_sec: number;
+    }>>(`/api/v1/devices/${id}/flows?limit=${limit}`);
   }
   deviceThroughputHistory(id: string, hours = 24) {
     return this.req<Array<{ ts: string; rx_bps: number; tx_bps: number; rx_pps: number; tx_pps: number }>>(

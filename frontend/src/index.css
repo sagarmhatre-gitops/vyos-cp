@@ -1019,3 +1019,72 @@ textarea { min-height: 72px; padding: 8px 10px; width: 100%; font-family: var(--
 .qos-tile.util { display: flex; flex-direction: column; align-items: center; }
 .qos-tile.util .qos-tile-head { align-self: flex-start; }
 .qos-traffic-status { grid-column: 1 / -1; font-size: 11px; padding: 4px 2px; }
+
+
+/* ---- Phase 2: usage view ---- */
+.usage-card { background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 50%), var(--bg-raised); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; color: var(--ink); }
+.usage-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.usage-title { font-weight: 600; font-size: 14px; color: var(--ink); }
+.usage-badge { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--ok); border: 1px solid var(--ok-soft); border-radius: 4px; padding: 1px 6px; }
+.usage-body { padding: 16px; display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: start; }
+@media (max-width: 800px) { .usage-body { grid-template-columns: 1fr; } }
+.usage-totals { display: flex; flex-direction: column; gap: 14px; }
+.usage-stat-label { font-size: 11px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .05em; }
+.usage-stat-val { font-size: 22px; font-weight: 700; margin-top: 2px; color: var(--ink); }
+.usage-stat-sub { font-size: 11px; color: var(--ink-muted); margin-top: 2px; }
+.usage-chart { min-height: 120px; }
+.usage-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
+.usage-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+.usage-bar { width: 100%; max-width: 18px; background: var(--brand); border-radius: 2px 2px 0 0; transition: height .3s; }
+.usage-bar.reset { background: var(--warn-ink); }
+.usage-bar-lbl { font-size: 9px; color: var(--ink-faint); margin-top: 4px; }
+.usage-note { font-size: 12px; line-height: 1.5; margin-top: 12px; grid-column: 1 / -1; }
+.usage-note.dim { color: var(--ink-muted); }
+
+/* ---- Phase 2: usage period selector ---- */
+.usage-controls { display: flex; align-items: center; gap: 12px; }
+.usage-period-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.usage-period-btn { font-size: 11px; padding: 3px 10px; background: transparent; color: var(--ink-muted); border: none; cursor: pointer; font-family: var(--font-sans); border-right: 1px solid var(--line); transition: background .15s, color .15s; }
+.usage-period-btn:last-child { border-right: none; }
+.usage-period-btn:hover { color: var(--ink); background: var(--bg-subtle); }
+.usage-period-btn.active { background: var(--brand); color: #fff; }
+
+
+/* ---- QoS page section bands ---- */
+.qos-band { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint); margin: 18px 2px 8px; display: flex; align-items: baseline; gap: 8px; }
+.qos-band:first-of-type { margin-top: 4px; }
+.qos-band span { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--ink-muted); }
+
+
+/* ---- Option A: compact QoS KPIs + lighter throughput tiles ---- */
+.qos-kpi-row { grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.qos-kpi { padding: 9px 12px; display: block; }
+.qos-kpi-icon { display: none; }
+.qos-kpi-value { font-size: 16px; font-weight: 500; }
+.qos-kpi-value small { font-size: 11px; }
+.qos-kpi-label { font-size: 11px; color: var(--ink-muted); margin-top: 1px; }
+.qos-kpi-sub { display: none; }
+.qos-tile { padding: 12px; }
+.qos-tile-head { margin-bottom: 6px; gap: 0; }
+.qos-tile-value { font-size: 20px; font-weight: 500; }
+.qos-tile-icon { display: none; }
+
+
+/* ---- QoS restyle (increment 1: chrome) — theme-neutral geometry only ---- */
+/* background/border-color intentionally NOT set here — owned by the
+   [data-theme] layers; overriding them would break dark-mode gradient lift. */
+.card { border-radius: 14px; }
+.card-head { padding: 13px 18px; }
+.card-title { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+.tbl { font-size: 12.5px; }
+.tbl thead th { padding: 9px 18px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.tbl tbody td { padding: 10px 18px; }
+.qos-band { margin: 26px 2px 10px; font-size: 11px; font-weight: 600; }
+.qos-band:first-of-type { margin-top: 8px; }
+.qos-kpi, .qos-tile { border-radius: 14px; }
+
+
+/* ---- Data Transfer bars: pack left at natural width (no flex-stretch) ---- */
+.usage-bars { justify-content: flex-start; gap: 4px; }
+.usage-bar-col { flex: 0 0 26px; }
+.usage-bar { width: 20px; max-width: 20px; }

@@ -1,0 +1,8 @@
+
+/* ---- Phase 2: usage period selector ---- */
+.usage-controls { display: flex; align-items: center; gap: 12px; }
+.usage-period-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.usage-period-btn { font-size: 11px; padding: 3px 10px; background: transparent; color: var(--ink-muted); border: none; cursor: pointer; font-family: var(--font-sans); border-right: 1px solid var(--line); transition: background .15s, color .15s; }
+.usage-period-btn:last-child { border-right: none; }
+.usage-period-btn:hover { color: var(--ink); background: var(--bg-subtle); }
+.usage-period-btn.active { background: var(--brand); color: #fff; }

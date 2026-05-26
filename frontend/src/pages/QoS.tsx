@@ -5,6 +5,7 @@ import { api, TrafficPolicy, TrafficClass, ClassMatcher, QoSEngine, TrafficPolic
 import { DeviceHeader } from '../components/DeviceHeader'
 import { QoSTraffic } from './QoSTraffic'
 import { QoSOverview } from './QoSOverview'
+import { FlowsView } from './FlowsView'
 
 export function QoS() {
   const { id } = useParams<{ id: string }>()
@@ -95,10 +96,13 @@ export function QoS() {
       {del.isError && <div className="err">Delete failed: {(del.error as Error).message}</div>}
       {unbind.isError && <div className="err">Unbind failed: {(unbind.error as Error).message}</div>}
 
+      <div className="qos-band">State <span>live &amp; configured</span></div>
       <QoSTraffic deviceId={id!} policies={policies} />
 
+      <div className="qos-band">Detail <span>usage &amp; shaping path</span></div>
       <QoSOverview policies={policies} bindings={bindingsQ.data || []} />
 
+      <div className="qos-band">Configuration <span>edit surfaces</span></div>
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="card-head"><span className="card-title">Traffic Policies</span></div>
         <table className="tbl">
@@ -161,6 +165,8 @@ export function QoS() {
           }
         }}
         cleaning={cleanup.isPending} />
+
+      <FlowsView deviceId={id!} />
 
       {editing && (
         <PolicyModal initial={editing} onClose={() => setEditing(null)}

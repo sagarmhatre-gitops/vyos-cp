@@ -1,0 +1,7 @@
+  deviceFlows(id: string, limit = 500) {
+    return this.req<Array<{
+      conntrack_id: string; protocol: string; state: string;
+      orig_src_ip: string; orig_src_port: string; orig_dst_ip: string; orig_dst_port: string;
+      reply_src_ip: string; reply_dst_ip: string; timeout_sec: number;
+    }>>(`/api/v1/devices/${id}/flows?limit=${limit}`);
+  }

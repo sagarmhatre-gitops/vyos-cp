@@ -63,6 +63,11 @@ type Poller struct {
 	// VYOS_CP_SNAPSHOT_INTERVAL_TICKS; default 30 (= 5 min at 10s ticks).
 	snapshotEveryTicks  uint64
 	snapshotTickCounter sync.Map // map[deviceID]*uint64
+
+	// Counter-snapshot cadence for usage accounting. Mirrors snapshotEveryTicks.
+	// Default ~30s (every 3rd tick at 10s). 0 disables usage metering.
+	counterSnapEveryTicks  uint64
+	counterSnapTickCounter sync.Map // map[deviceID]*uint64
 }
 
 func New(s *store.Store, get func(ctx context.Context, id string) (*vyos.Client, error), interval time.Duration) *Poller {
@@ -71,6 +76,7 @@ func New(s *store.Store, get func(ctx context.Context, id string) (*vyos.Client,
 		subs: make(map[chan Event]struct{}),
 		Thru: NewThroughputStore(),
 		snapshotEveryTicks: readSnapshotEveryTicks(),
+		counterSnapEveryTicks: readCounterSnapEveryTicks(),
 	}
 }
 
@@ -84,6 +90,8 @@ func (p *Poller) SetMetricsCollector(m MetricsCollector) {
 func (p *Poller) Run(ctx context.Context) {
 	// Kick the retention job on startup and then hourly.
 	go p.retentionLoop(ctx)
+	// Usage rollup: accumulate counter snapshots into per-period usage.
+	go p.usageRollupLoop(ctx)
 
 	// Device metrics (CPU, memory, sessions) sample at minute granularity.
 	// Independent of the fast status/throughput tick so we don't hammer the
@@ -169,6 +177,19 @@ func (p *Poller) retentionLoop(ctx context.Context) {
 			log.Printf("retention: prune metrics err: %v", err)
 		} else if m > 0 {
 			log.Printf("retention: pruned %d device-metric rows older than 30d", m)
+		}
+		// Raw counter snapshots are short-lived; usage_rollups retains the data.
+		snapCut := time.Now().Add(-48 * time.Hour)
+		snapCut2 := time.Now().Add(-6 * time.Hour)
+		if fc, err := p.store.PruneFlowSnapshots(ctx, snapCut2); err != nil {
+			log.Printf("retention: prune flow-snapshots err: %v", err)
+		} else if fc > 0 {
+			log.Printf("retention: pruned %d flow snapshots older than 6h", fc)
+		}
+		if c, err := p.store.PruneCounterSnapshots(ctx, snapCut); err != nil {
+			log.Printf("retention: prune counter-snapshots err: %v", err)
+		} else if c > 0 {
+			log.Printf("retention: pruned %d counter snapshots older than 48h", c)
 		}
 	}
 	run()
@@ -270,6 +291,8 @@ func (p *Poller) pollOne(ctx context.Context, deviceID string) {
 	}
 
 	p.maybeCaptureSnapshot(ctx, deviceID, client)
+	p.collectFlows(ctx, deviceID, client)
+	p.maybePersistCounters(ctx, deviceID)
 }
 
 // listEthernetNames pulls the ethernet interface names from config so the

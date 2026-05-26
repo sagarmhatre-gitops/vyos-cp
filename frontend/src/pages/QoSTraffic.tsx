@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api, TrafficPolicy } from '../lib/api'
+import { UsageView } from './UsageView'
 
 // QoSTraffic — LIVE traffic layer for the QoS page. All real data, sourced from
 // the existing throughput pipeline (poller -> throughput_samples -> API):
@@ -108,6 +109,7 @@ export function QoSTraffic({ deviceId, policies }: { deviceId: string; policies:
   const noData = !loading && samples.length === 0
 
   return (
+    <>
     <div className="qos-traffic-row">
       <div className="qos-tile in">
         <div className="qos-tile-head"><span className="qos-tile-icon in"><IconDown /></span>Total Inbound</div>
@@ -145,5 +147,9 @@ export function QoSTraffic({ deviceId, policies }: { deviceId: string; policies:
         </div>
       )}
     </div>
+      <div style={{ marginTop: 16 }}>
+        <UsageView deviceId={deviceId} />
+      </div>
+    </>
   )
 }

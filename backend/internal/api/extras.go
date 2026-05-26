@@ -40,6 +40,10 @@ func (s *Server) RegisterExtras(r chi.Router) {
 	r.Get("/api/v1/fleet/throughput", s.fleetThroughput)
 	r.Get("/api/v1/fleet/throughput/history", s.fleetThroughputHistory)
 
+	r.Get("/api/v1/devices/{id}/usage", s.deviceUsage)
+
+	r.Get("/api/v1/devices/{id}/flows", s.deviceFlows)
+
 	// QoS
 	r.Get("/api/v1/devices/{id}/qos/policies", s.listTrafficPolicies)
 	r.Put("/api/v1/devices/{id}/qos/policies/{name}", s.upsertTrafficPolicy)
