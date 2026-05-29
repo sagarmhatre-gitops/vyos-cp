@@ -78,15 +78,27 @@ type DeviceConfig struct {
 type FirewallConfig struct {
 	IPv4 map[string]any `json:"ipv4,omitempty"`
 	IPv6 map[string]any `json:"ipv6,omitempty"`
+
+	// Residual catches sub-keys under "firewall" that this struct doesn't
+	// model yet (e.g. group, zone, bridge, flowtable, global-options).
+	// Preserved verbatim so snapshots stay lossless.
+	Residual map[string]any `json:"residual,omitempty"`
 }
 
 type NATConfig struct {
 	Source      map[string]any `json:"source,omitempty"`
 	Destination map[string]any `json:"destination,omitempty"`
+
+	// Residual catches sub-keys under "nat" we don't yet model.
+	Residual map[string]any `json:"residual,omitempty"`
 }
 
 type InterfacesConfig struct {
 	Ethernet map[string]any `json:"ethernet,omitempty"`
 	Bonding  map[string]any `json:"bonding,omitempty"`
 	VLAN     map[string]any `json:"vlan,omitempty"`
+
+	// Residual catches sub-keys under "interfaces" we don't yet model
+	// (e.g. loopback, dummy, bridge, wireguard, tunnel, pppoe, input).
+	Residual map[string]any `json:"residual,omitempty"`
 }

@@ -80,3 +80,23 @@ clean:
 	rm -rf bin frontend/dist backend/cmd/vyos-cp/static/*
 	@mkdir -p backend/cmd/vyos-cp/static
 	@echo '<!doctype html><title>vyos-cp</title><p>Frontend not built.</p>' > backend/cmd/vyos-cp/static/index.html
+
+
+## ── Simulation engine ────────────────────────────────────────────────────────
+
+.PHONY: sim-test sim-bench sim-lint
+
+sim-test:
+	@echo "[sim] running simulation engine unit tests"
+	docker run --rm -v $(PWD)/backend:/src -w /src golang:1.22-alpine \
+		go test ./internal/simulation/... -v -count=1
+
+sim-bench:
+	@echo "[sim] benchmark: rule evaluation throughput"
+	docker run --rm -v $(PWD)/backend:/src -w /src golang:1.22-alpine \
+		go test ./internal/simulation/... -bench=. -benchmem -run=^$$
+
+sim-lint:
+	@echo "[sim] staticcheck on simulation package"
+	docker run --rm -v $(PWD)/backend:/src -w /src golang:1.22-alpine sh -c \
+		"go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./internal/simulation/..."

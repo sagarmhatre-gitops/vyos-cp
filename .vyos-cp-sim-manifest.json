@@ -1,0 +1,30 @@
+{
+  "deployed_at": "2026-05-28T05:01:39Z",
+  "version": "1.0.0",
+  "files": {
+    "backend/internal/simulation/engine.go": {
+      "sha256": "3934b21a752a"
+    },
+    "backend/internal/simulation/engine_test.go": {
+      "sha256": "03d495e7c0ec"
+    },
+    "backend/internal/api/simulation.go": {
+      "sha256": "9140c551446c"
+    },
+    "migrations/004_simulation_sessions.sql": {
+      "sha256": "0d2ee1932ddb"
+    },
+    "docker-compose.patch.yml": {
+      "sha256": "91f3deaa4492"
+    },
+    "Makefile.simulation.mk": {
+      "sha256": "08449ebb5b19"
+    },
+    "frontend/src/components/simulation/RuleSimulationPanel.tsx": {
+      "sha256": "c14eccbe8dc9"
+    },
+    "docs/simulation-engine.md": {
+      "sha256": "2de15082e8b0"
+    }
+  }
+}

@@ -443,3 +443,185 @@
 .tbl tbody tr.lc-picked:hover {
     background: var(--brand-soft);
 }
+
+
+/* Tree view (Clickable Tree Navigation) */
+
+.lc-tree {
+    font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 4px;
+    background: var(--bg, transparent);
+    overflow: auto;
+}
+
+.lc-tree-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    cursor: default;
+}
+.lc-tree-row.dim {
+    opacity: 0.35;
+}
+.lc-tree-row:hover {
+    background: var(--row-hover, rgba(127, 127, 127, 0.08));
+}
+
+button.lc-tree-row.lc-tree-toggle {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    width: 100%;
+}
+button.lc-tree-row.lc-tree-toggle:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: -2px;
+}
+
+.lc-tree-chev {
+    display: inline-block;
+    width: 12px;
+    color: var(--ink-mute, var(--brand));
+    flex-shrink: 0;
+}
+.lc-tree-gutter {
+    display: inline-block;
+    width: 12px;
+    color: transparent;
+    flex-shrink: 0;
+}
+
+.lc-tree-key {
+    color: var(--ink);
+    font-weight: 500;
+}
+.lc-tree-key.dim {
+    color: var(--ink-mute, var(--ink));
+    font-style: italic;
+    font-weight: 400;
+}
+
+.lc-tree-sep {
+    color: var(--ink-mute, var(--ink));
+}
+
+.lc-tree-placeholder {
+    color: var(--ink-mute, var(--ink));
+    opacity: 0.7;
+}
+
+.lc-tree-count {
+    color: var(--brand);
+    font-variant-numeric: tabular-nums;
+    margin-left: 4px;
+}
+
+.lc-tree-children {
+    /* no extra indent — children compute their own padding from depth */
+}
+
+.lc-tree-branch.dim > .lc-tree-row {
+    opacity: 0.35;
+}
+.lc-tree-branch.dim .lc-tree-children {
+    opacity: 1; /* children may contain matches even if branch dimmed */
+}
+
+/* Leaf value colors — match the JSON viewer's syntax-highlight palette */
+.lc-tree-str  { color: var(--ok, #4ade80); }
+.lc-tree-num  { color: var(--brand, #60a5fa); }
+.lc-tree-bool { color: var(--warn, #fbbf24); }
+.lc-tree-null { color: var(--ink-mute, #9ca3af); font-style: italic; }
+
+/* Search match highlight */
+.lc-tree-mark {
+    background: rgba(96, 165, 250, 0.25);
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+}
+
+/* Tree/JSON view toggle (sits in the actions strip next to the search box) */
+.lc-view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.lc-view-btn {
+    background: transparent;
+    border: 0;
+    color: var(--ink-mute, var(--ink));
+    padding: 4px 12px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+}
+.lc-view-btn + .lc-view-btn {
+    border-left: 1px solid var(--line);
+}
+.lc-view-btn:hover {
+    color: var(--ink);
+}
+.lc-view-btn.active {
+    background: var(--brand);
+    color: var(--brand-ink, #fff);
+}
+
+
+/* Tree view layout fix (refresh-button wrap) */
+
+/* The search input is the only flexible thing in the actions strip; if the
+ * row runs out of room, the input gives up width — not the buttons. */
+.lc-strip-actions .lc-search {
+    flex: 1 1 200px;
+    min-width: 120px;
+}
+
+/* Both the toggle and the Refresh button must keep their natural widths. */
+.lc-strip-actions .lc-view-toggle,
+.lc-strip-actions > button {
+    flex: 0 0 auto;
+}
+
+/* Never break mid-word on action buttons. "Refresh now" stays on one line. */
+.lc-strip-actions > button,
+.lc-view-btn {
+    white-space: nowrap;
+}
+
+/* The toggle was using overflow:hidden which clipped the second button under
+ * tight layouts. Use a clean separator instead — the buttons sit side by side
+ * inside a bordered pill that doesn't clip. */
+.lc-view-toggle {
+    overflow: visible;
+}
+
+
+/* CLI view (Show Configuration Commands) */
+.lc-cli {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 12px;
+    background: var(--bg, transparent);
+}
+.lc-cli-pre {
+    font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink);
+    margin: 0;
+    white-space: pre;
+    overflow: auto;
+}

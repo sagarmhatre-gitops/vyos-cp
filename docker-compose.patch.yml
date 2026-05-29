@@ -1,0 +1,10 @@
+# ─── vyos-cp docker-compose.yml ───────────────────────────────────────────────
+# Patch note: simulation engine is compiled into the app binary — no extra
+# containers are required. The patch adds VYOS_CP_SIMULATION_ENABLED env var
+# so operators can toggle the feature without a rebuild.
+#
+# Add to the `app` service environment section:
+#
+#   environment:
+#     - VYOS_CP_SIMULATION_ENABLED=true
+#     - VYOS_CP_SIMULATION_MAX_TRACE=200   # optional, default 200

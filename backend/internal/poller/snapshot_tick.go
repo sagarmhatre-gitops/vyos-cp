@@ -60,10 +60,11 @@ func (p *Poller) captureSnapshot(ctx context.Context, deviceID string, client *v
 		log.Printf("snapshot: decode failed device=%s err=%v", deviceID, err)
 		return
 	}
+	cfg := routeSnapshotTree(tree) // snapshot routing v1
 	if _, err := p.store.AppendSnapshot(cctx, model.DeviceSnapshot{
 		DeviceID: deviceID,
 		Source:   model.SourceDevice,
-		Config:   model.DeviceConfig{Extra: tree},
+		Config:   cfg,
 	}); err != nil {
 		log.Printf("snapshot: persist failed device=%s err=%v", deviceID, err)
 	}
@@ -79,4 +80,87 @@ func (p *Poller) CaptureSnapshot(ctx context.Context, deviceID string) {
 		return
 	}
 	p.captureSnapshot(ctx, deviceID, client)
+}
+
+
+// routeSnapshotTree turns a raw VyOS /retrieve response into a DeviceConfig
+// with well-known sub-trees in their typed fields and anything else in Extra.
+//
+// This is intentionally simple: it pulls firewall/nat/interfaces if present,
+// routes their known sub-keys into typed fields, and stores unmodeled
+// sub-keys in a Residual map on each sub-config. Anything we don't recognise
+// at the top level (protocols, qos, service, system, vpn, vrf, ...) lands in
+// Extra so it's preserved losslessly for future modeling.
+func routeSnapshotTree(tree map[string]any) model.DeviceConfig {
+	cfg := model.DeviceConfig{}
+
+	if fw, ok := tree["firewall"].(map[string]any); ok {
+		cfg.Firewall = routeFirewall(fw)
+		delete(tree, "firewall")
+	}
+	if nat, ok := tree["nat"].(map[string]any); ok {
+		cfg.NAT = routeNAT(nat)
+		delete(tree, "nat")
+	}
+	if iface, ok := tree["interfaces"].(map[string]any); ok {
+		cfg.Interfaces = routeInterfaces(iface)
+		delete(tree, "interfaces")
+	}
+
+	if len(tree) > 0 {
+		cfg.Extra = tree
+	}
+	return cfg
+}
+
+func routeFirewall(fw map[string]any) model.FirewallConfig {
+	out := model.FirewallConfig{}
+	if v, ok := fw["ipv4"].(map[string]any); ok {
+		out.IPv4 = v
+		delete(fw, "ipv4")
+	}
+	if v, ok := fw["ipv6"].(map[string]any); ok {
+		out.IPv6 = v
+		delete(fw, "ipv6")
+	}
+	if len(fw) > 0 {
+		out.Residual = fw
+	}
+	return out
+}
+
+func routeNAT(nat map[string]any) model.NATConfig {
+	out := model.NATConfig{}
+	if v, ok := nat["source"].(map[string]any); ok {
+		out.Source = v
+		delete(nat, "source")
+	}
+	if v, ok := nat["destination"].(map[string]any); ok {
+		out.Destination = v
+		delete(nat, "destination")
+	}
+	if len(nat) > 0 {
+		out.Residual = nat
+	}
+	return out
+}
+
+func routeInterfaces(iface map[string]any) model.InterfacesConfig {
+	out := model.InterfacesConfig{}
+	if v, ok := iface["ethernet"].(map[string]any); ok {
+		out.Ethernet = v
+		delete(iface, "ethernet")
+	}
+	if v, ok := iface["bonding"].(map[string]any); ok {
+		out.Bonding = v
+		delete(iface, "bonding")
+	}
+	if v, ok := iface["vlan"].(map[string]any); ok {
+		out.VLAN = v
+		delete(iface, "vlan")
+	}
+	if len(iface) > 0 {
+		out.Residual = iface
+	}
+	return out
 }

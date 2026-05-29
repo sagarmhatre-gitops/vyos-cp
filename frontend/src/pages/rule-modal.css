@@ -1,0 +1,99 @@
+/* rule-modal.css — styling for the redesigned collapsible RuleModal.
+   Reuses existing vocabulary (modal, field, row2, diff, hint, btn) and adds
+   the section/chip/impact pieces. Import once (e.g. in RuleSetEditor.tsx). */
+
+.modal-wide { max-width: 720px; width: 92vw; }
+
+.rm-body { display: flex; flex-direction: column; gap: 10px; }
+
+/* ── Collapsible section ── */
+.rm-section {
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elev, rgba(0, 0, 0, 0.015));
+}
+
+.rm-section-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.rm-section-head:hover { background: var(--bg-hover, rgba(0, 0, 0, 0.03)); }
+
+.rm-section-chev { color: var(--ink-muted, #8a93a3); font-size: 11px; width: 12px; }
+
+.rm-section-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink, #1a1f29);
+}
+
+.rm-section-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 99px;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+.rm-badge-ok { background: rgba(34, 197, 94, 0.14); color: #16a34a; }
+.rm-badge-warn { background: rgba(234, 179, 8, 0.16); color: #b45309; }
+.rm-badge-err { background: rgba(239, 68, 68, 0.14); color: #dc2626; }
+.rm-badge-info { background: rgba(59, 130, 246, 0.14); color: #2563eb; }
+
+.rm-section-body {
+  padding: 12px;
+  border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Two-column traffic match ── */
+.rm-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.rm-col { display: flex; flex-direction: column; gap: 8px; }
+.rm-col-title {
+  font-size: 11px; font-weight: 600; color: var(--ink-muted, #8a93a3);
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px;
+}
+
+/* ── Chips for state / logging ── */
+.rm-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.rm-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; padding: 5px 10px; border-radius: 99px;
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
+  cursor: pointer; user-select: none;
+}
+.rm-chip input { margin: 0; }
+.rm-chip-on { background: rgba(59, 130, 246, 0.12); border-color: rgba(59, 130, 246, 0.4); color: #2563eb; }
+.rm-chip-warn { background: rgba(234, 179, 8, 0.14); border-color: rgba(234, 179, 8, 0.4); color: #b45309; }
+
+/* ── Impact notes ── */
+.rm-impact {
+  padding: 9px 11px; border-radius: 6px; border: 1px solid;
+}
+.rm-impact + .rm-impact { margin-top: 8px; }
+.rm-impact-title { font-size: 12px; font-weight: 600; }
+.rm-impact-detail { font-size: 11px; color: var(--ink-muted, #8a93a3); margin-top: 3px; line-height: 1.5; }
+.rm-impact-high { background: rgba(239, 68, 68, 0.07); border-color: rgba(239, 68, 68, 0.35); }
+.rm-impact-high .rm-impact-title { color: #dc2626; }
+.rm-impact-medium { background: rgba(234, 179, 8, 0.08); border-color: rgba(234, 179, 8, 0.35); }
+.rm-impact-medium .rm-impact-title { color: #b45309; }
+.rm-impact-low { background: rgba(59, 130, 246, 0.07); border-color: rgba(59, 130, 246, 0.3); }
+.rm-impact-low .rm-impact-title { color: #2563eb; }
+
+@media (max-width: 560px) {
+  .rm-cols { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,7 @@
+
+/* ---- QoS collapsible bands ---- */
+.qos-band-toggle { cursor: pointer; user-select: none; }
+.qos-band-toggle:hover { color: var(--ink-muted); }
+.qos-chevron { display: inline-block; width: 14px; font-size: 10px; color: var(--ink-faint); margin-right: 2px; }
+.qos-section { /* expanded: natural height */ }
+.qos-section.collapsed { display: none; }

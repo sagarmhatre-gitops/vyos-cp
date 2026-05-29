@@ -10,6 +10,7 @@ import (
 	"github.com/vyos-cp/vyos-cp/internal/diff"
 	"github.com/vyos-cp/vyos-cp/internal/model"
 	"github.com/vyos-cp/vyos-cp/internal/store"
+	"github.com/vyos-cp/vyos-cp/internal/vyos"
 )
 
 // Snapshot handlers — Ship 1.
@@ -220,8 +221,106 @@ func (s *Server) computeDiff(w http.ResponseWriter, r *http.Request) {
 // router. Called from extras.go::RegisterExtras.
 func (s *Server) RegisterSnapshotRoutes(r chi.Router) {
 	r.Get("/api/v1/devices/{id}/snapshot", s.getLatestSnapshot)
+	r.Get("/api/v1/devices/{id}/snapshot/cli", s.getLatestSnapshotCLI)
 	r.Get("/api/v1/devices/{id}/snapshots", s.listSnapshots)
 	r.Post("/api/v1/devices/{id}/snapshot", s.captureSnapshotNow)
 	r.Get("/api/v1/devices/{id}/snapshots/{snapshotId}", s.getSnapshotByID)
 	r.Get("/api/v1/devices/{id}/diff", s.computeDiff)
+}
+
+// getLatestSnapshotCLI returns the latest snapshot's config rendered as
+// VyOS `set ...` lines. Display-only synthesis — NOT a round-trip to
+// /configure. The walker produces ops with paths only (no values for
+// empty-object leaf nodes), and vyos.OpsToCLI formats them with proper
+// quoting.
+//
+// GET /api/v1/devices/{id}/snapshot/cli
+func (s *Server) getLatestSnapshotCLI(w http.ResponseWriter, r *http.Request) {
+	deviceID := chi.URLParam(r, "id")
+	if deviceID == "" {
+		http.Error(w, "missing device id", http.StatusBadRequest)
+		return
+	}
+	snap, err := s.svc.Store().LatestSnapshot(r.Context(), deviceID)
+	if errors.Is(err, store.ErrNoSnapshot) {
+		http.Error(w, "no snapshot yet", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "load snapshot: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tree := flattenSnapshotConfig(snap.Config)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"taken_at":    snap.TakenAt,
+		"config_hash": snap.ConfigHash,
+		"cli":         vyos.SynthesizeCLI(tree),
+	})
+}
+
+// flattenSnapshotConfig assembles a DeviceConfig (typed fields + Residuals +
+// Extra) back into the natural VyOS tree shape: {firewall: {ipv4, ipv6, ...},
+// nat: {source, destination, ...}, interfaces: {ethernet, ..., loopback, input},
+// + any unmodeled top-level sections (protocols, qos, ...)}. This is the
+// inverse of the routing the poller does on capture.
+func flattenSnapshotConfig(c model.DeviceConfig) map[string]any {
+	out := map[string]any{}
+	if fw := flattenFirewall(c.Firewall); len(fw) > 0 {
+		out["firewall"] = fw
+	}
+	if nat := flattenNAT(c.NAT); len(nat) > 0 {
+		out["nat"] = nat
+	}
+	if iface := flattenInterfaces(c.Interfaces); len(iface) > 0 {
+		out["interfaces"] = iface
+	}
+	for k, v := range c.Extra {
+		out[k] = v
+	}
+	return out
+}
+
+func flattenFirewall(f model.FirewallConfig) map[string]any {
+	out := map[string]any{}
+	if f.IPv4 != nil {
+		out["ipv4"] = f.IPv4
+	}
+	if f.IPv6 != nil {
+		out["ipv6"] = f.IPv6
+	}
+	for k, v := range f.Residual {
+		out[k] = v
+	}
+	return out
+}
+
+func flattenNAT(n model.NATConfig) map[string]any {
+	out := map[string]any{}
+	if n.Source != nil {
+		out["source"] = n.Source
+	}
+	if n.Destination != nil {
+		out["destination"] = n.Destination
+	}
+	for k, v := range n.Residual {
+		out[k] = v
+	}
+	return out
+}
+
+func flattenInterfaces(i model.InterfacesConfig) map[string]any {
+	out := map[string]any{}
+	if i.Ethernet != nil {
+		out["ethernet"] = i.Ethernet
+	}
+	if i.Bonding != nil {
+		out["bonding"] = i.Bonding
+	}
+	if i.VLAN != nil {
+		out["vlan"] = i.VLAN
+	}
+	for k, v := range i.Residual {
+		out[k] = v
+	}
+	return out
 }

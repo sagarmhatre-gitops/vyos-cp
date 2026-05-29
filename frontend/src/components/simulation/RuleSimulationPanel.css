@@ -1,0 +1,171 @@
+/* RuleSimulationPanel — styles. Plain CSS to match the existing class
+   vocabulary (card, mono, hint, err, tbl, btn) and CSS variables. */
+
+.sim-root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.sim-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.sim-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.sim-head-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #9aa3b2);
+  flex: 1;
+}
+
+.sim-chev {
+  color: var(--ink-muted, #9aa3b2);
+  font-size: 12px;
+}
+
+.sim-body {
+  padding: 14px;
+}
+
+.sim-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sim-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sim-field > span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-muted, #9aa3b2);
+}
+
+.sim-field input,
+.sim-field select {
+  height: 32px;
+  font-size: 13px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: var(--bg-input, rgba(255, 255, 255, 0.04));
+  color: var(--ink, #e6e9ef);
+}
+
+.sim-run {
+  margin-top: 12px;
+  width: 100%;
+}
+
+/* ── Result box ── */
+.sim-result {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid;
+}
+
+.sim-result-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sim-result-sub {
+  font-size: 12px;
+  color: var(--ink-muted, #9aa3b2);
+  margin: 2px 0 6px;
+}
+
+.sim-result-ok {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #22c55e;
+}
+
+.sim-result-drop {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+}
+
+.sim-result-none {
+  background: var(--bg-input, rgba(255, 255, 255, 0.04));
+  border-color: var(--border, rgba(255, 255, 255, 0.12));
+  color: var(--ink-muted, #9aa3b2);
+}
+
+/* ── Badges ── */
+.sim-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+
+.sim-badge-info { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+.sim-badge-ok { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.sim-badge-err { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.sim-badge-warn { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+
+/* ── Findings ── */
+.sim-find {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid;
+  margin-bottom: 8px;
+}
+
+.sim-find:last-child { margin-bottom: 0; }
+
+.sim-find-title { font-size: 12px; font-weight: 600; }
+.sim-find-detail { font-size: 11px; color: var(--ink-muted, #9aa3b2); margin-top: 3px; }
+
+.sim-find-critical, .sim-find-high {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.sim-find-critical .sim-find-title, .sim-find-high .sim-find-title { color: #ef4444; }
+
+.sim-find-medium {
+  background: rgba(234, 179, 8, 0.08);
+  border-color: rgba(234, 179, 8, 0.35);
+}
+.sim-find-medium .sim-find-title { color: #eab308; }
+
+.sim-find-low {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.35);
+}
+.sim-find-low .sim-find-title { color: #60a5fa; }
+
+/* ── Trace table ── */
+.sim-trace td { vertical-align: top; }
+
+.sim-trace-match { background: rgba(34, 197, 94, 0.08); }
+.sim-trace-ne { opacity: 0.45; }
+
+.sim-trace-arrow { color: #22c55e; font-weight: 700; font-size: 12px; }
+.sim-trace-reason { font-size: 10px; color: var(--ink-muted, #9aa3b2); margin-top: 2px; font-style: italic; }
+
+.sim-act-accept { color: #22c55e; font-weight: 600; }
+.sim-act-drop { color: #ef4444; font-weight: 600; }
+.sim-act-reject { color: #eab308; font-weight: 600; }

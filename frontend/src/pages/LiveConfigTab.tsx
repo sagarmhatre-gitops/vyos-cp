@@ -187,6 +187,7 @@ export function LiveConfigTab({ deviceId, canCapture }: Props) {
                     onRefresh={refreshNow}
                     filter={currentFilter}
                     setFilter={setCurrentFilter}
+                    deviceId={deviceId}
                 />
             )}
 
@@ -230,7 +231,9 @@ function CurrentView(props: {
     onRefresh: () => void;
     filter: string;
     setFilter: (s: string) => void;
+    deviceId: string;
 }) {
+    const [view, setView] = useState<"tree" | "json" | "cli">("tree");
     if (props.loading) return <div className="lc-empty">Loading…</div>;
     return (
         <>
@@ -256,6 +259,31 @@ function CurrentView(props: {
                 )}
                 <div className="lc-strip-actions">
                     {props.snap && (
+                        <div className="lc-view-toggle" role="tablist" aria-label="View mode">
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={view === "tree"}
+                                className={"lc-view-btn" + (view === "tree" ? " active" : "")}
+                                onClick={() => setView("tree")}
+                            >Tree</button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={view === "json"}
+                                className={"lc-view-btn" + (view === "json" ? " active" : "")}
+                                onClick={() => setView("json")}
+                            >JSON</button>
+                            <button
+                                type="button"
+                                role="tab"
+                                aria-selected={view === "cli"}
+                                className={"lc-view-btn" + (view === "cli" ? " active" : "")}
+                                onClick={() => setView("cli")}
+                            >CLI</button>
+                        </div>
+                    )}
+                    {props.snap && (
                         <input
                             type="text"
                             placeholder="search config…"
@@ -279,7 +307,13 @@ function CurrentView(props: {
             {props.error && <div className="lc-error">{props.error}</div>}
 
             {props.snap && (
-                <JsonViewer value={props.snap.config} filter={props.filter} />
+                view === "tree" ? (
+                    <ConfigTree value={props.snap.config} filter={props.filter} />
+                ) : view === "cli" ? (
+                    <CliView deviceId={props.deviceId} filter={props.filter} />
+                ) : (
+                    <JsonViewer value={props.snap.config} filter={props.filter} />
+                )
             )}
         </>
     );
@@ -672,4 +706,291 @@ function renderValue(v: unknown): ReactNode {
     const s = JSON.stringify(v, null, 2);
     if (s.length > 800) return s.slice(0, 800) + "…";
     return s;
+}
+
+
+/* ── ConfigTree ─────────────────────────────────────────────────────────────
+ * Clickable tree navigation for Live Config. Renders the snapshot JSON as
+ * collapsible nodes. Object keys are clickable to expand/collapse children.
+ * Leaf values render inline with type-appropriate styling.
+ *
+ * Behavior:
+ *   • Top-level object's keys are expanded by default; deeper levels collapsed.
+ *   • Search (filter prop) auto-expands paths to matching keys/values and
+ *     dims non-matching siblings.
+ *   • Collapsed object/array nodes show a (count) badge of direct children.
+ *   • Hover any key to see its full dotted path in a tooltip.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+function ConfigTree({ value, filter }: { value: unknown; filter: string }) {
+    const needle = filter.trim().toLowerCase();
+    return (
+        <div className="lc-tree" role="tree">
+            <TreeNode
+                nodeKey={null}
+                value={value}
+                path={[]}
+                depth={0}
+                needle={needle}
+                defaultOpen
+            />
+        </div>
+    );
+}
+
+function TreeNode({
+    nodeKey,
+    value,
+    path,
+    depth,
+    needle,
+    defaultOpen,
+}: {
+    nodeKey: string | number | null;
+    value: unknown;
+    path: Array<string | number>;
+    depth: number;
+    needle: string;
+    defaultOpen?: boolean;
+}) {
+    // Whether this subtree contains a match (recomputed when filter changes).
+    const matchInfo = useMemo(
+        () => computeMatch(nodeKey, value, needle),
+        [nodeKey, value, needle],
+    );
+
+    // Open by default when:
+    //   • caller said so (root), or
+    //   • a search is active and there's a match somewhere in this subtree.
+    const forcedOpen = !!needle && matchInfo.subtreeMatch;
+    const [open, setOpen] = useState<boolean>(defaultOpen || forcedOpen);
+
+    // Keep open state in sync if the search makes a previously-closed branch
+    // newly relevant. We don't auto-close when filter clears — that would
+    // collapse everything the user has been browsing.
+    useEffect(() => {
+        if (forcedOpen) setOpen(true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [forcedOpen]);
+
+    const dottedPath = path.map((p) => String(p)).join(".") || "(root)";
+    const dim = needle && !matchInfo.subtreeMatch;
+
+    // Leaf rendering
+    if (!isContainer(value)) {
+        return (
+            <div
+                className={"lc-tree-row" + (dim ? " dim" : "")}
+                style={{ paddingLeft: depth * 14 }}
+                role="treeitem"
+                aria-level={depth + 1}
+            >
+                <span className="lc-tree-gutter" aria-hidden>•</span>
+                {nodeKey !== null && (
+                    <span className="lc-tree-key" title={dottedPath}>
+                        {highlightText(String(nodeKey), needle)}
+                    </span>
+                )}
+                <span className="lc-tree-sep">:</span>
+                <LeafValue value={value} needle={needle} />
+            </div>
+        );
+    }
+
+    // Container rendering (object / array)
+    const entries = isArray(value)
+        ? (value as unknown[]).map((v, i) => [i, v] as const)
+        : Object.entries(value as Record<string, unknown>);
+    const count = entries.length;
+    const containerLabel = isArray(value) ? "[…]" : "{…}";
+
+    return (
+        <div
+            className={"lc-tree-branch" + (dim ? " dim" : "")}
+            role="treeitem"
+            aria-level={depth + 1}
+            aria-expanded={open}
+        >
+            <button
+                type="button"
+                className="lc-tree-row lc-tree-toggle"
+                style={{ paddingLeft: depth * 14 }}
+                onClick={() => setOpen((o) => !o)}
+            >
+                <span className="lc-tree-chev" aria-hidden>{open ? "▾" : "▸"}</span>
+                {nodeKey !== null ? (
+                    <span className="lc-tree-key" title={dottedPath}>
+                        {highlightText(String(nodeKey), needle)}
+                    </span>
+                ) : (
+                    <span className="lc-tree-key dim" title={dottedPath}>root</span>
+                )}
+                {!open && (
+                    <>
+                        <span className="lc-tree-sep">:</span>
+                        <span className="lc-tree-placeholder">{containerLabel}</span>
+                        <span className="lc-tree-count">{count}</span>
+                    </>
+                )}
+            </button>
+            {open && (
+                <div className="lc-tree-children" role="group">
+                    {entries.map(([k, v]) => (
+                        <TreeNode
+                            key={String(k)}
+                            nodeKey={k as string | number}
+                            value={v}
+                            path={[...path, k as string | number]}
+                            depth={depth + 1}
+                            needle={needle}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function LeafValue({ value, needle }: { value: unknown; needle: string }) {
+    if (value === null) return <span className="lc-tree-null">null</span>;
+    if (typeof value === "boolean")
+        return <span className="lc-tree-bool">{String(value)}</span>;
+    if (typeof value === "number")
+        return <span className="lc-tree-num">{value}</span>;
+    if (typeof value === "string")
+        return (
+            <span className="lc-tree-str">
+                "{highlightText(value, needle)}"
+            </span>
+        );
+    // arrays/objects shouldn't land here; render as JSON for safety
+    return <span className="lc-tree-str">{JSON.stringify(value)}</span>;
+}
+
+function isContainer(v: unknown): boolean {
+    return v !== null && typeof v === "object";
+}
+function isArray(v: unknown): v is unknown[] {
+    return Array.isArray(v);
+}
+
+/** Does this node (key or scalar value) directly match the needle? */
+function selfMatches(
+    nodeKey: string | number | null,
+    value: unknown,
+    needle: string,
+): boolean {
+    if (!needle) return false;
+    if (nodeKey !== null && String(nodeKey).toLowerCase().includes(needle)) return true;
+    if (value === null) return "null".includes(needle);
+    const t = typeof value;
+    if (t === "string") return (value as string).toLowerCase().includes(needle);
+    if (t === "number" || t === "boolean") return String(value).toLowerCase().includes(needle);
+    return false;
+}
+
+/** Recursive subtree match: this node OR any descendant matches. */
+function computeMatch(
+    nodeKey: string | number | null,
+    value: unknown,
+    needle: string,
+): { selfMatch: boolean; subtreeMatch: boolean } {
+    if (!needle) return { selfMatch: false, subtreeMatch: false };
+    const selfMatch = selfMatches(nodeKey, value, needle);
+    if (selfMatch) return { selfMatch, subtreeMatch: true };
+    if (!isContainer(value)) return { selfMatch: false, subtreeMatch: false };
+    const entries = isArray(value)
+        ? (value as unknown[]).map((v, i) => [i, v] as const)
+        : Object.entries(value as Record<string, unknown>);
+    for (const [k, v] of entries) {
+        const child = computeMatch(k as string | number, v, needle);
+        if (child.subtreeMatch) return { selfMatch: false, subtreeMatch: true };
+    }
+    return { selfMatch: false, subtreeMatch: false };
+}
+
+/** Wraps occurrences of `needle` in <mark> spans for inline highlighting. */
+function highlightText(text: string, needle: string): ReactNode {
+    if (!needle) return text;
+    const lo = text.toLowerCase();
+    const out: ReactNode[] = [];
+    let i = 0;
+    while (i < text.length) {
+        const j = lo.indexOf(needle, i);
+        if (j === -1) {
+            out.push(text.slice(i));
+            break;
+        }
+        if (j > i) out.push(text.slice(i, j));
+        out.push(
+            <mark className="lc-tree-mark" key={j}>
+                {text.slice(j, j + needle.length)}
+            </mark>,
+        );
+        i = j + needle.length;
+    }
+    return out;
+}
+
+
+/* ── CliView ────────────────────────────────────────────────────────────────
+ * Fetches the synthesized VyOS CLI for the latest snapshot and renders it.
+ * Server-side synthesis means we get authoritative quoting and ordering;
+ * the UI just displays and filters.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+function CliView({ deviceId, filter }: { deviceId: string; filter: string }) {
+    const [cli, setCli] = useState<string | null>(null);
+    const [err, setErr] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [copied, setCopied] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        setErr(null);
+        api.getLatestSnapshotCLI(deviceId)
+            .then((r: any) => {
+                if (cancelled) return;
+                setCli(r?.cli || "");
+                setLoading(false);
+            })
+            .catch((e: any) => {
+                if (cancelled) return;
+                setErr(e?.message || String(e));
+                setLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, [deviceId]);
+
+    const needle = filter.trim().toLowerCase();
+    const lines = useMemo(() => (cli || "").split("\n"), [cli]);
+    const visible = useMemo(() => {
+        if (!needle) return lines;
+        return lines.filter((l) => l.toLowerCase().includes(needle));
+    }, [lines, needle]);
+
+    const copy = () => {
+        if (!cli) return;
+        navigator.clipboard?.writeText(visible.join("\n"))
+            .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })
+            .catch(() => {});
+    };
+
+    if (loading) return <div className="lc-empty">Synthesizing CLI…</div>;
+    if (err) return <div className="lc-error">CLI synthesis failed: {err}</div>;
+    if (!cli) return <div className="lc-empty">(no commands)</div>;
+
+    return (
+        <div className="lc-cli">
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                <button type="button" className="btn btn-xs" onClick={copy}>
+                    {copied ? "Copied" : `Copy${needle ? " filtered" : ""}`}
+                </button>
+            </div>
+            <pre className="lc-cli-pre">
+                {visible.length === 0 ? `(no lines match "${filter}")` : visible.join("\n")}
+            </pre>
+        </div>
+    );
 }

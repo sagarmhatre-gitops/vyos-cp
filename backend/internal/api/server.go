@@ -77,6 +77,10 @@ func (s *Server) Router() http.Handler {
 		r.Post("/api/v1/devices/{id}/firewall/{family}/rulesets/{name}/rules", s.upsertRule)
 		r.Delete("/api/v1/devices/{id}/firewall/{family}/rulesets/{name}/rules/{n}", s.deleteRule)
 
+		r.Post("/api/v1/devices/{id}/firewall/{family}/rulesets/{name}/simulate", s.simulatePacket)
+		r.Get("/api/v1/devices/{id}/firewall/{family}/rulesets/{name}/shadow", s.shadowAnalysis)
+		r.Post("/api/v1/devices/{id}/firewall/{family}/rulesets/{name}/translate-preview", s.translatePreview)
+
 		r.Post("/api/v1/devices/{id}/firewall/groups", s.upsertGroup)
 
 		r.Get("/api/v1/audit", s.listAudit)

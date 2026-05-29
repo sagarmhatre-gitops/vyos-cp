@@ -12,6 +12,9 @@ export function QoS() {
   const qc = useQueryClient()
   const [editing, setEditing] = useState<TrafficPolicy | null>(null)
   const [binding, setBinding] = useState<{ policy: string } | null>(null)
+  const [openBands, setOpenBands] = useState({ state: true, detail: true, config: false })
+  const toggleBand = (k: 'state' | 'detail' | 'config') =>
+    setOpenBands(o => ({ ...o, [k]: !o[k] }))
 
   const q = useQuery({
     queryKey: ['qos', id], queryFn: () => api.listTrafficPolicies(id!), enabled: !!id,
@@ -96,13 +99,18 @@ export function QoS() {
       {del.isError && <div className="err">Delete failed: {(del.error as Error).message}</div>}
       {unbind.isError && <div className="err">Unbind failed: {(unbind.error as Error).message}</div>}
 
-      <div className="qos-band">State <span>live &amp; configured</span></div>
+      <div className="qos-band qos-band-toggle" onClick={() => toggleBand('state')}><span className="qos-chevron">{openBands.state ? '\u25be' : '\u25b8'}</span>State <span>live &amp; configured</span></div>
+      <div className={'qos-section' + (openBands.state ? '' : ' collapsed')}>
       <QoSTraffic deviceId={id!} policies={policies} />
+      </div>
 
-      <div className="qos-band">Detail <span>usage &amp; shaping path</span></div>
+      <div className="qos-band qos-band-toggle" onClick={() => toggleBand('detail')}><span className="qos-chevron">{openBands.detail ? '\u25be' : '\u25b8'}</span>Detail <span>usage &amp; shaping path</span></div>
+      <div className={'qos-section' + (openBands.detail ? '' : ' collapsed')}>
       <QoSOverview policies={policies} bindings={bindingsQ.data || []} />
+      </div>
 
-      <div className="qos-band">Configuration <span>edit surfaces</span></div>
+      <div className="qos-band qos-band-toggle" onClick={() => toggleBand('config')}><span className="qos-chevron">{openBands.config ? '\u25be' : '\u25b8'}</span>Configuration <span>edit surfaces</span></div>
+      <div className={'qos-section' + (openBands.config ? '' : ' collapsed')}>
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="card-head"><span className="card-title">Traffic Policies</span></div>
         <table className="tbl">
@@ -167,6 +175,7 @@ export function QoS() {
         cleaning={cleanup.isPending} />
 
       <FlowsView deviceId={id!} />
+      </div>
 
       {editing && (
         <PolicyModal initial={editing} onClose={() => setEditing(null)}

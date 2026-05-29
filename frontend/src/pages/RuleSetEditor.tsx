@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, ReactNode} from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api, Rule } from '../lib/api'
 import { DeviceHeader } from '../components/DeviceHeader'
 import { useLiveCounters, fmtCount, fmtBytes } from '../hooks/useLive'
+import { RuleSimulationPanel } from '../components/simulation/RuleSimulationPanel'
+import './rule-modal.css'
+
 
 export function RuleSetEditor() {
   const { id, family, name } = useParams<{ id: string; family: string; name: string }>()
@@ -104,6 +107,10 @@ export function RuleSetEditor() {
           saving={upsert.isPending}
         />
       )}
+
+      {id && family && name && (
+        <RuleSimulationPanel id={id} family={family} name={name} />
+      )}
     </>
   )
 }
@@ -160,157 +167,270 @@ export function RuleModal({ initial, groups, onClose, onSave, saving }: {
   const updateDst = (patch: any) => { setDirty(true); setR(x => ({ ...x, destination: { ...(x.destination || {}), ...patch } })) }
   const updateState = (patch: any) => { setDirty(true); setR(x => ({ ...x, state: { ...(x.state || {}), ...patch } })) }
 
+  // Collapsible section open/closed state.
+  const [open, setOpen] = useState<Record<string, boolean>>({
+    basic: true, match: true, advanced: false, impact: true, config: false,
+  })
+  const toggle = (k: string) => setOpen(o => ({ ...o, [k]: !o[k] }))
+
   const safeClose = () => {
     if (dirty && !confirm('Discard your changes?')) return
     onClose()
   }
 
-  // Escape key closes (with dirty prompt).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') safeClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [dirty])
 
-  // Filter groups by type for each picker. address-group fits IP rules;
-  // network-group also works in source/destination; port-group fits ports.
   const addrGroups = groups.filter(g => g.type === 'address-group' || g.type === 'network-group')
   const portGroups = groups.filter(g => g.type === 'port-group')
 
+  // ── Live impact heuristics (no backend round-trip; instant feedback) ──
+  const impact = analyzeRuleImpact(r)
+
   return (
     <div className="modal-backdrop">
-      <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className="modal modal-wide" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
-          <h2>Rule {r.number}</h2>
+          <div>
+            <h2>Rule {r.number}</h2>
+            <div className="hint">{r.description || 'No description'}</div>
+          </div>
           <button className="btn" type="button" onClick={safeClose} style={{ background: 'transparent', border: 0 }}>✕</button>
         </div>
-        <div className="modal-body">
-          <div className="row2">
+
+        <div className="modal-body rm-body">
+
+          {/* ── Basic Policy ── */}
+          <Section id="basic" title="Basic Policy" badge={r.action} open={open.basic} onToggle={() => toggle('basic')}>
+            <div className="row2">
+              <div className="field">
+                <label>Rule number</label>
+                <input type="text" value={r.number}
+                  onChange={e => update({ number: parseInt(e.target.value) || 0 })} />
+              </div>
+              <div className="field">
+                <label>Action</label>
+                <select className="select" value={r.action} onChange={e => update({ action: e.target.value })}>
+                  <option value="accept">accept</option>
+                  <option value="drop">drop</option>
+                  <option value="reject">reject</option>
+                  <option value="jump">jump</option>
+                  <option value="return">return</option>
+                </select>
+              </div>
+            </div>
+            {r.action === 'jump' && (
+              <div className="field">
+                <label>Jump target</label>
+                <input type="text" value={r.jump_target || ''}
+                  onChange={e => update({ jump_target: e.target.value })} placeholder="RULESET-NAME" />
+              </div>
+            )}
+            <div className="row2">
+              <div className="field">
+                <label>Protocol</label>
+                <select className="select" value={r.protocol || ''} onChange={e => update({ protocol: e.target.value })}>
+                  <option value="">(any)</option>
+                  <option value="tcp">tcp</option>
+                  <option value="udp">udp</option>
+                  <option value="icmp">icmp</option>
+                  <option value="tcp_udp">tcp_udp</option>
+                  <option value="all">all</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Description</label>
+                <input type="text" value={r.description || ''}
+                  onChange={e => update({ description: e.target.value })} placeholder="What this rule is for" />
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Traffic Match ── */}
+          <Section id="match" title="Traffic Match" badge={matchSummaryBadge(r)} open={open.match} onToggle={() => toggle('match')}>
+            <div className="rm-cols">
+              <div className="rm-col">
+                <div className="rm-col-title">Source</div>
+                <div className="field"><label>Address / CIDR</label>
+                  <input type="text" value={r.source?.address || ''} onChange={e => updateSrc({ address: e.target.value })} placeholder="0.0.0.0/0 or 10.0.0.1" /></div>
+                <div className="field"><label>Port</label>
+                  <input type="text" value={r.source?.port || ''} onChange={e => updateSrc({ port: e.target.value })} placeholder="443, 80,443, 1000-2000" /></div>
+                <div className="field"><label>Address-group</label>
+                  <input type="text" list="rule-addr-groups"
+                    value={r.source?.group?.address_group || ''}
+                    onChange={e => updateSrc({ group: { ...(r.source?.group || {}), address_group: e.target.value } })}
+                    placeholder="e.g. neysa-trusted" /></div>
+              </div>
+              <div className="rm-col">
+                <div className="rm-col-title">Destination</div>
+                <div className="field"><label>Address / CIDR</label>
+                  <input type="text" value={r.destination?.address || ''} onChange={e => updateDst({ address: e.target.value })} placeholder="0.0.0.0/0 or 10.10.0.10" /></div>
+                <div className="field"><label>Port</label>
+                  <input type="text" value={r.destination?.port || ''} onChange={e => updateDst({ port: e.target.value })} placeholder="443, 22, 8080" /></div>
+                <div className="field"><label>Address-group</label>
+                  <input type="text" list="rule-addr-groups"
+                    value={r.destination?.group?.address_group || ''}
+                    onChange={e => updateDst({ group: { ...(r.destination?.group || {}), address_group: e.target.value } })}
+                    placeholder="start typing to see groups" /></div>
+              </div>
+            </div>
+          </Section>
+
+          {/* ── Advanced ── */}
+          <Section id="advanced" title="Advanced" badge={advancedSummaryBadge(r)} open={open.advanced} onToggle={() => toggle('advanced')}>
             <div className="field">
-              <label>Number</label>
-              <input type="text" value={r.number}
-                onChange={e => update({ number: parseInt(e.target.value) || 0 })} />
+              <label>Connection state</label>
+              <div className="rm-chips">
+                {(['established','related','new','invalid'] as const).map(k => (
+                  <label key={k} className={`rm-chip ${r.state?.[k] ? 'rm-chip-on' : ''}`}>
+                    <input type="checkbox" checked={!!r.state?.[k]} onChange={e => updateState({ [k]: e.target.checked })} /> {k}
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="field">
-              <label>Action</label>
-              <select className="select" value={r.action} onChange={e => update({ action: e.target.value })}>
-                <option value="accept">accept</option>
-                <option value="drop">drop</option>
-                <option value="reject">reject</option>
-                <option value="jump">jump</option>
-                <option value="return">return</option>
-              </select>
+              <label>GeoIP country codes <span className="hint">(comma-separated)</span></label>
+              <input type="text"
+                value={(r.source_countries || []).join(',')}
+                onChange={e => update({ source_countries: e.target.value.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) })}
+                placeholder="CN, RU, KP" />
             </div>
-          </div>
-
-          {r.action === 'jump' && (
             <div className="field">
-              <label>Jump target</label>
-              <input type="text" value={r.jump_target || ''}
-                onChange={e => update({ jump_target: e.target.value })} placeholder="RULESET-NAME" />
+              <label>Logging &amp; status</label>
+              <div className="rm-chips">
+                <label className={`rm-chip ${r.log ? 'rm-chip-on' : ''}`}>
+                  <input type="checkbox" checked={!!r.log} onChange={e => update({ log: e.target.checked })} /> Log matches
+                </label>
+                <label className={`rm-chip ${r.disable ? 'rm-chip-warn' : ''}`}>
+                  <input type="checkbox" checked={!!r.disable} onChange={e => update({ disable: e.target.checked })} /> Disable rule
+                </label>
+              </div>
             </div>
-          )}
+          </Section>
 
-          <div className="field">
-            <label>Description</label>
-            <input type="text" value={r.description || ''}
-              onChange={e => update({ description: e.target.value })} />
-          </div>
-
-          <div className="row2">
-            <div className="field">
-              <label>Protocol</label>
-              <select className="select" value={r.protocol || ''} onChange={e => update({ protocol: e.target.value })}>
-                <option value="">(any)</option>
-                <option value="tcp">tcp</option>
-                <option value="udp">udp</option>
-                <option value="icmp">icmp</option>
-                <option value="tcp_udp">tcp_udp</option>
-                <option value="all">all</option>
-              </select>
-            </div>
-            <div className="field" style={{ display: 'flex', alignItems: 'end', gap: 16 }}>
-              <label><input type="checkbox" checked={!!r.log} onChange={e => update({ log: e.target.checked })} /> Log</label>
-              <label><input type="checkbox" checked={!!r.disable} onChange={e => update({ disable: e.target.checked })} /> Disable</label>
-            </div>
-          </div>
-
-          <h3 style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--ink-muted)', marginTop: 10, letterSpacing: '0.05em' }}>Source</h3>
-          <div className="row2">
-            <div className="field"><label>Address / CIDR</label>
-              <input type="text" value={r.source?.address || ''} onChange={e => updateSrc({ address: e.target.value })} /></div>
-            <div className="field"><label>Port</label>
-              <input type="text" value={r.source?.port || ''} onChange={e => updateSrc({ port: e.target.value })} placeholder="443, 80,443, 1000-2000" /></div>
-          </div>
-          <div className="field"><label>Address-group reference</label>
-            <input type="text" list="rule-addr-groups"
-              value={r.source?.group?.address_group || ''}
-              onChange={e => updateSrc({ group: { ...(r.source?.group || {}), address_group: e.target.value } })}
-              placeholder="start typing to see existing groups" /></div>
-          <div className="field"><label>GeoIP country codes <span className="hint">(comma-separated)</span></label>
-            <input type="text"
-              value={(r.source_countries || []).join(',')}
-              onChange={e => update({ source_countries: e.target.value.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) })}
-              placeholder="CN, RU, KP" /></div>
-
-          <h3 style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--ink-muted)', marginTop: 10, letterSpacing: '0.05em' }}>Destination</h3>
-          <div className="row2">
-            <div className="field"><label>Address / CIDR</label>
-              <input type="text" value={r.destination?.address || ''} onChange={e => updateDst({ address: e.target.value })} /></div>
-            <div className="field"><label>Port</label>
-              <input type="text" value={r.destination?.port || ''} onChange={e => updateDst({ port: e.target.value })} /></div>
-          </div>
-          <div className="field"><label>Address-group reference</label>
-            <input type="text" list="rule-addr-groups"
-              value={r.destination?.group?.address_group || ''}
-              onChange={e => updateDst({ group: { ...(r.destination?.group || {}), address_group: e.target.value } })}
-              placeholder="start typing to see existing groups" /></div>
-
-          <h3 style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--ink-muted)', marginTop: 10, letterSpacing: '0.05em' }}>Connection state</h3>
-          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-            {(['established','related','new','invalid'] as const).map(k => (
-              <label key={k}>
-                <input type="checkbox"
-                  checked={!!r.state?.[k]}
-                  onChange={e => updateState({ [k]: e.target.checked })} /> {k}
-              </label>
-            ))}
-          </div>
-
-          <h3 style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--ink-muted)', marginTop: 14, letterSpacing: '0.05em' }}>Preview</h3>
-          <div className="diff">
-            {previewOps(r).map((op, i) => (
-              <div key={i} className={op.op === 'delete' ? 'del' : 'add'}>
-                {op.op === 'delete' ? '− ' : '+ '}
-                {op.op} firewall ... rule {r.number} {op.path.slice(5).join(' ')}{op.value ? ` ${JSON.stringify(op.value)}` : ''}
+          {/* ── Validation & Impact ── */}
+          <Section id="impact" title="Validation & Impact"
+            badge={impact.length ? `${impact.length} note${impact.length === 1 ? '' : 's'}` : 'clean'}
+            badgeTone={impact.some(i => i.level === 'high') ? 'err' : impact.length ? 'warn' : 'ok'}
+            open={open.impact} onToggle={() => toggle('impact')}>
+            {impact.length === 0 && <div className="hint">No obvious issues with this rule's configuration.</div>}
+            {impact.map((i, idx) => (
+              <div key={idx} className={`rm-impact rm-impact-${i.level}`}>
+                <div className="rm-impact-title">{i.title}</div>
+                <div className="rm-impact-detail">{i.detail}</div>
               </div>
             ))}
-          </div>
+          </Section>
+
+          {/* ── Generated Config ── */}
+          <Section id="config" title="Generated VyOS Config" badge="diff" open={open.config} onToggle={() => toggle('config')}>
+            <div className="diff">
+              {previewOps(r).map((op, i) => (
+                <div key={i} className={op.op === 'delete' ? 'del' : 'add'}>
+                  {op.op === 'delete' ? '− ' : '+ '}
+                  {op.op} firewall ... rule {r.number} {op.path.slice(5).join(' ')}{op.value ? ` ${JSON.stringify(op.value)}` : ''}
+                </div>
+              ))}
+            </div>
+          </Section>
+
         </div>
+
         <div className="modal-foot">
           <button className="btn" type="button" onClick={safeClose}>Cancel</button>
           <button className="btn btn-primary" disabled={saving} type="button" onClick={() => onSave(r)}>
             {saving ? 'Committing…' : 'Commit'}
           </button>
         </div>
+
         <datalist id="rule-addr-groups">
           {addrGroups.map(g => (
-            <option key={`${g.type}:${g.name}`} value={g.name}>
-              {g.type} · {g.members.length} members
-            </option>
+            <option key={`${g.type}:${g.name}`} value={g.name}>{g.type} · {g.members.length} members</option>
           ))}
         </datalist>
         <datalist id="rule-port-groups">
-          {portGroups.map(g => (
-            <option key={g.name} value={g.name}>
-              {g.members.length} members
-            </option>
-          ))}
+          {portGroups.map(g => (<option key={g.name} value={g.name}>{g.members.length} members</option>))}
         </datalist>
       </div>
     </div>
   )
 }
+
+// ── Collapsible section shell ──────────────────────────────────────────────
+function Section({ id, title, badge, badgeTone, open, onToggle, children }: {
+  id: string; title: string; badge?: string; badgeTone?: 'ok' | 'warn' | 'err' | 'info';
+  open: boolean; onToggle: () => void; children: ReactNode;
+}) {
+  return (
+    <div className="rm-section" data-section={id}>
+      <button type="button" className="rm-section-head" onClick={onToggle}>
+        <span className="rm-section-chev">{open ? '▾' : '▸'}</span>
+        <span className="rm-section-title">{title}</span>
+        {badge && <span className={`rm-section-badge rm-badge-${badgeTone || 'info'}`}>{badge}</span>}
+      </button>
+      {open && <div className="rm-section-body">{children}</div>}
+    </div>
+  )
+}
+
+// ── Section badge summaries (compact, glanceable) ──────────────────────────
+function matchSummaryBadge(r: Rule): string {
+  const bits: string[] = []
+  if (r.source?.group?.address_group) bits.push(`src <${r.source.group.address_group}>`)
+  else if (r.source?.address) bits.push('src set')
+  if (r.destination?.address || r.destination?.group?.address_group) bits.push('dst set')
+  if (r.destination?.port) bits.push(`:${r.destination.port}`)
+  return bits.join(' ') || 'any → any'
+}
+
+function advancedSummaryBadge(r: Rule): string {
+  const bits: string[] = []
+  const st = r.state || {}
+  const states = (['established','related','new','invalid'] as const).filter(k => st[k])
+  if (states.length) bits.push(states.map(s => s.slice(0, 3)).join(','))
+  if (r.source_countries?.length) bits.push(`geo ${r.source_countries.length}`)
+  if (r.log) bits.push('log')
+  if (r.disable) bits.push('disabled')
+  return bits.join(' · ') || 'none'
+}
+
+// ── Live, client-side impact heuristics ────────────────────────────────────
+// Instant feedback as the operator types — no backend round-trip. The
+// authoritative shadow/risk analysis still runs server-side on the page panel.
+function analyzeRuleImpact(r: Rule): Array<{ level: 'high' | 'medium' | 'low'; title: string; detail: string }> {
+  const out: Array<{ level: 'high' | 'medium' | 'low'; title: string; detail: string }> = []
+  const srcAny = !r.source?.address && !r.source?.group?.address_group && !r.source?.group?.network_group
+  const dstAny = !r.destination?.address && !r.destination?.group?.address_group
+  const noPort = !r.destination?.port && !r.destination?.group?.port_group
+  const anyProto = !r.protocol || r.protocol === 'all'
+
+  if (r.action === 'accept' && srcAny && dstAny && noPort && anyProto) {
+    out.push({ level: 'high', title: 'Allow-any rule',
+      detail: 'This accepts all traffic from any source to any destination — it will shadow every rule below it. Add a source, destination, or port match.' })
+  }
+  const mgmt: Record<string, string> = { '22': 'SSH', '23': 'Telnet', '3389': 'RDP', '5900': 'VNC' }
+  if (r.action === 'accept' && srcAny && r.destination?.port && mgmt[r.destination.port]) {
+    out.push({ level: 'high', title: `Exposed ${mgmt[r.destination.port]} (port ${r.destination.port})`,
+      detail: 'A management port is open from any source. Restrict to a trusted address-group or management CIDR.' })
+  }
+  if (r.source?.address === '0.0.0.0/0' && r.action === 'accept' && !r.source?.group?.address_group) {
+    out.push({ level: 'medium', title: 'Broad source (0.0.0.0/0)',
+      detail: 'Consider narrowing the source to a known range for a tighter security posture.' })
+  }
+  if (r.source_countries?.length && anyProto && noPort) {
+    out.push({ level: 'low', title: 'Broad GeoIP policy',
+      detail: 'GeoIP filtering applies across all protocols and ports; VPN tunnels can bypass country-based rules.' })
+  }
+  if (r.action === 'jump' && !r.jump_target) {
+    out.push({ level: 'high', title: 'Missing jump target',
+      detail: 'A jump action requires a target rule-set name.' })
+  }
+  return out
+}
+
 
 // Mirrors the server-side translator to show a diff. Not perfect — server is
 // the source of truth — but gives the user visibility before commit.

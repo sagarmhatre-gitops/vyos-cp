@@ -1,824 +1,651 @@
-import { useEffect, useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useState, useRef } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
-import { api, SNMPConfig, SNMPCommunity, SNMPV3User, SNMPV3Group, SNMPTrapTarget, Interface } from '../lib/api'
+import {
+  api,
+  SNMPConfig, SNMPCommunity, SNMPV3User, SNMPV3Group, SNMPV3View, SNMPTrapTarget,
+} from '../lib/api'
 import { DeviceHeader } from '../components/DeviceHeader'
-import { Loading } from '../components/Loading'
 
-type SnmpTab = 'system' | 'v2c' | 'v3' | 'traps'
-
-// Generate a 12-byte random hex engine ID (VyOS accepts 10-32 byte hex).
-function generateEngineID(): string {
-  const bytes = new Uint8Array(12)
-  crypto.getRandomValues(bytes)
-  return '8000' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
-}
-
-// Alphanumeric-only sanitizer for VyOS names (underscore + hyphen allowed,
-// but VyOS's own grammar varies — we keep it permissive and let VyOS be the
-// final arbiter. For SNMP user/community names specifically VyOS rejects
-// hyphens, so we aggressively strip those for those fields.)
-const clean = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '')
-const cleanStrict = (s: string) => s.replace(/[^A-Za-z0-9_]/g, '')
+type Modal =
+  | { type: 'community';    item: SNMPCommunity  | null }
+  | { type: 'user';         item: SNMPV3User      | null }
+  | { type: 'group';        item: SNMPV3Group     | null }
+  | { type: 'view';         item: SNMPV3View      | null }
+  | { type: 'trap';         item: SNMPTrapTarget  | null }
+  | { type: 'deleteAll' }
 
 export function SNMP() {
   const { id } = useParams<{ id: string }>()
-  const [tab, setTab] = useState<SnmpTab>('system')
-  const [cfg, setCfg] = useState<SNMPConfig | null>(null)
-  const [dirty, setDirty] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [ok, setOk] = useState(false)
-  const [editMode, setEditMode] = useState(false)
+  const qc = useQueryClient()
+  const [modal, setModal] = useState<Modal | null>(null)
 
-  const deviceQ = useQuery({ queryKey: ['device', id], queryFn: () => api.getDevice(id!), enabled: !!id })
-  const q = useQuery({ queryKey: ['snmp', id], queryFn: () => api.getSNMPConfig(id!), enabled: !!id })
-  const ifacesQ = useQuery({
-    queryKey: ['interfaces', id], queryFn: () => api.listInterfaces(id!),
-    enabled: !!id, staleTime: 30_000,
+  // Section refs — "View all" links scroll to these
+  const refCommunities = useRef<HTMLDivElement>(null)
+  const refUsers       = useRef<HTMLDivElement>(null)
+  const refHosts       = useRef<HTMLDivElement>(null)
+  const refViews       = useRef<HTMLDivElement>(null)
+  const refEvents      = useRef<HTMLDivElement>(null)
+  const scrollTo = (ref: React.RefObject<HTMLDivElement>) =>
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  const q = useQuery({
+    queryKey: ['snmp', id],
+    queryFn: () => api.getSNMPConfig(id!),
+    enabled: !!id,
   })
-
-  useEffect(() => { if (q.data) setCfg(q.data) }, [q.data])
 
   const save = useMutation({
-    mutationFn: () => {
-      // Auto-fill engine ID if missing but v3 users exist (VyOS 1.5 requires
-      // an engine ID to hash v3 passwords; without it the commit explodes).
-      let c = cfg!
-      if ((c.v3_users?.length || 0) > 0 && !c.engine_id) {
-        c = { ...c, engine_id: generateEngineID() }
-      }
-      return api.upsertSNMPConfig(id!, c)
-    },
+    mutationFn: (cfg: SNMPConfig) => api.upsertSNMPConfig(id!, cfg),
     onSuccess: () => {
-      setErr(null); setOk(true); setDirty(false)
-      setTimeout(() => setOk(false), 2500)
-      // Refetch from VyOS to show what actually landed — encrypted passwords,
-      // normalized names, engine IDs that VyOS may have rewritten.
-      q.refetch()
+      qc.invalidateQueries({ queryKey: ['snmp', id] })
+      setModal(null)
     },
-    onError: (e: any) => setErr(e.message),
   })
 
-  // Destructive: removes the entire `service snmp` subtree from the device.
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const deleteAll = useMutation({
     mutationFn: () => api.deleteSNMPConfig(id!),
-    onSuccess: () => {
-      setErr(null); setOk(true); setDirty(false); setConfirmDelete(false)
-      setEditMode(false)
-      setTimeout(() => setOk(false), 2500)
-      q.refetch()
-    },
-    onError: (e: any) => { setErr(e.message); setConfirmDelete(false) },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['snmp', id] }),
   })
 
-  if (q.isError) return (
-    <>
-      <DeviceHeader />
-      <div className="err" style={{ marginTop: 12 }}>
-        Failed to load SNMP config: {(q.error as Error).message}
-      </div>
-    </>
-  )
-  if (!cfg) return (
-    <>
-      <DeviceHeader />
-      <div className="card" style={{ padding: 8 }}><Loading /></div>
-    </>
-  )
+  const cfg: SNMPConfig = q.data ?? {}
+  const communities     = cfg.communities  ?? []
+  const v3users         = cfg.v3_users     ?? []
+  const v3groups        = cfg.v3_groups    ?? []
+  const v3views         = cfg.v3_views     ?? []
+  const traps           = cfg.trap_targets ?? []
 
-  const isProd = (deviceQ.data?.tags || []).some(t => t.toLowerCase() === 'production')
-  const hasV2C = (cfg.communities?.length || 0) > 0
-    || (cfg.trap_targets || []).some(t => t.version === 'v2c')
+  const updatedAt = q.dataUpdatedAt
+    ? new Date(q.dataUpdatedAt).toLocaleTimeString() : null
 
-  // Pre-flight: every selected listen-address must exist on the device, and
-  // its interface VRF must match the configured SNMP VRF.
-  const ifaces = ifacesQ.data || []
-  const addrToVRF: Record<string, { iface: string; vrf: string }> = {}
-  for (const i of ifaces) {
-    for (const a of i.addresses || []) {
-      const bare = a.split('/')[0]
-      if (bare && !bare.startsWith('fe80')) {
-        addrToVRF[bare] = { iface: i.name, vrf: i.vrf || '' }
-      }
-    }
+  // Patch helpers — replace/add/remove one item then POST full config
+  function saveCommunity(item: SNMPCommunity, orig: SNMPCommunity | null) {
+    const list = orig
+      ? communities.map(c => c.name === orig.name ? item : c)
+      : [...communities, item]
+    save.mutate({ ...cfg, communities: list })
   }
-  const cfgVRF = (cfg.vrf || '').trim()
-  const addrErrors: string[] = []
-  for (const sel of cfg.listen_addresses || []) {
-    const m = addrToVRF[sel]
-    if (!m) { addrErrors.push(`${sel} is not on any interface`); continue }
-    if ((m.vrf || '') !== cfgVRF) {
-      addrErrors.push(`${sel} → VRF ${m.vrf || 'default'}, but SNMP VRF is ${cfgVRF || 'default'}`)
-    }
+  function deleteCommunity(name: string) {
+    save.mutate({ ...cfg, communities: communities.filter(c => c.name !== name) })
   }
-  const hasAddrError = addrErrors.length > 0
-  const update = (patch: Partial<SNMPConfig>) => { setDirty(true); setCfg({ ...cfg, ...patch }) }
+
+  function saveUser(item: SNMPV3User, orig: SNMPV3User | null) {
+    const list = orig
+      ? v3users.map(u => u.name === orig.name ? item : u)
+      : [...v3users, item]
+    save.mutate({ ...cfg, v3_users: list })
+  }
+  function deleteUser(name: string) {
+    save.mutate({ ...cfg, v3_users: v3users.filter(u => u.name !== name) })
+  }
+
+  function saveView(item: SNMPV3View, orig: SNMPV3View | null) {
+    const list = orig
+      ? v3views.map(v => v.name === orig.name ? item : v)
+      : [...v3views, item]
+    save.mutate({ ...cfg, v3_views: list })
+  }
+  function deleteView(name: string) {
+    save.mutate({ ...cfg, v3_views: v3views.filter(v => v.name !== name) })
+  }
+
+  function saveTrap(item: SNMPTrapTarget, orig: SNMPTrapTarget | null) {
+    const list = orig
+      ? traps.map(t => t.address === orig.address ? item : t)
+      : [...traps, item]
+    save.mutate({ ...cfg, trap_targets: list })
+  }
+  function deleteTrap(address: string) {
+    save.mutate({ ...cfg, trap_targets: traps.filter(t => t.address !== address) })
+  }
 
   return (
     <>
       <DeviceHeader />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16 }}>
+
+      {/* ── Page header ──────────────────────────────── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
         <div>
-          <h2 style={{ fontSize: 16 }}>SNMP</h2>
+          <h2 style={{ fontSize: 16, marginBottom: 4 }}>SNMP</h2>
           <div className="hint">v2c communities, v3 users/groups/views, and trap destinations.</div>
-          <div style={{ marginTop: 6, fontSize: 11, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {dirty ? (
-              <>
-                <span style={{
-                  display: 'inline-block', width: 8, height: 8, borderRadius: 4,
-                  background: 'var(--warn, #e08e00)',
-                }} />
-                <span style={{ color: 'var(--warn-ink, #e08e00)' }}>
-                  Staged changes — not yet committed to device
-                </span>
-              </>
-            ) : (
-              <>
-                <span style={{
-                  display: 'inline-block', width: 8, height: 8, borderRadius: 4,
-                  background: 'var(--ok, #0a8f50)',
-                }} />
-                <span style={{ color: 'var(--ink-muted)' }}>
-                  In sync with {deviceQ.data?.address || 'device'}
-                  {q.dataUpdatedAt ? ` · fetched ${new Date(q.dataUpdatedAt).toLocaleTimeString()}` : ''}
-                </span>
-                <button className="btn" style={{
-                  height: 20, padding: '0 8px', fontSize: 10, marginLeft: 4,
-                }} onClick={() => q.refetch()}>↻ refetch</button>
-              </>
-            )}
-          </div>
+          {updatedAt && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--ok)' }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--ok)', display: 'inline-block', flexShrink: 0 }} />
+                In sync · fetched {updatedAt}
+              </span>
+              <button className="btn" style={{ height: 24, fontSize: 11, padding: '0 10px' }}
+                onClick={() => q.refetch()} disabled={q.isFetching}>↺ refetch</button>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {!editMode ? (
-            <>
-              <button className="btn btn-danger"
-                onClick={() => setConfirmDelete(true)}
-                disabled={isEmptyConfig(cfg)}
-                title={isEmptyConfig(cfg) ? 'Nothing to delete' : 'Remove the entire SNMP configuration from the device'}>
-                Delete all
-              </button>
-              <button className="btn btn-primary" onClick={() => setEditMode(true)}>
-                Edit
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="btn" onClick={() => {
-                if (dirty && !confirm('Discard unsaved changes?')) return
-                if (q.data) setCfg(q.data)
-                setDirty(false); setErr(null); setEditMode(false)
-              }}>
-                Cancel
-              </button>
-              <button className="btn btn-primary"
-                disabled={save.isPending || !dirty || hasAddrError}
-                title={hasAddrError ? `Fix ${addrErrors.length} validation error(s) before saving` : ''}
-                onClick={() => save.mutate(undefined, {
-                  onSuccess: () => setEditMode(false),
-                })}>
-                {save.isPending ? 'Committing…' : 'Save'}
-              </button>
-            </>
-          )}
+          <button className="btn btn-danger" style={{ fontSize: 12 }}
+            onClick={() => setModal({ type: 'deleteAll' })}>Delete all</button>
+          <button className="btn btn-primary" style={{ fontSize: 12 }}
+            onClick={() => setModal({ type: 'community', item: null })}>+ Add community / user</button>
         </div>
       </div>
 
-      {isProd && hasV2C && (
-        <div style={{
-          background: 'var(--danger-soft)', color: 'var(--danger-ink)',
-          padding: '10px 14px', borderRadius: 6, marginBottom: 12,
-          fontSize: 13, borderLeft: '3px solid var(--danger)',
-        }}>
-          <strong>Production device with v2c config</strong> — the commit will be
-          rejected. Remove v2c communities and trap targets, or untag the device as production.
-        </div>
-      )}
-      {err && <div className="err">{err}</div>}
-      {ok && <div style={{
-        background: 'var(--ok-soft)', color: 'var(--ok)',
-        padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 12,
-      }}>Saved.</div>}
-
-      <div style={{
-        display: 'flex', gap: 2, borderBottom: '1px solid var(--line)',
-        marginBottom: 14, overflowX: 'auto',
-      }}>
-        {(['system','v2c','v3','traps'] as SnmpTab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)} style={subTabStyle(tab === t)}>
-            {label(t)}{badge(t, cfg)}
-          </button>
-        ))}
+      {/* ── Metric cards ────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>
+        {/* Each card is also a clickable shortcut to its section */}
+        <MetricCard icon={<IconGrid />}    value={communities.length} label="SNMP Communities" sub="Configured"
+          color="#185FA5" bg="#E6F1FB" onClick={() => scrollTo(refCommunities)} />
+        <MetricCard icon={<IconUsers />}   value={v3users.length}     label="SNMP Users"       sub="Configured"
+          color="#1D9E75" bg="#E1F5EE" onClick={() => scrollTo(refUsers)} />
+        <MetricCard icon={<IconMonitor />} value={traps.length}       label="SNMP Hosts"       sub="Allowed"
+          color="#7B3FBF" bg="#F3E8FF" onClick={() => scrollTo(refHosts)} />
+        <MetricCard icon={<IconBell />}    value="0"                  label="Auth Failures"    sub="Last 24h"
+          color="#BA7517" bg="#FBF0DB" onClick={() => scrollTo(refEvents)} />
+        <MetricCard icon={<IconShield />}  value={v3users.length > 0 ? 'v3' : 'v2c'} label="SNMPv3"
+          sub={v3users.length > 0 ? 'Enabled' : 'Disabled'}
+          color="#0F6E56" bg="#E1F5EE" onClick={() => scrollTo(refUsers)} />
       </div>
 
-      <fieldset disabled={!editMode} style={{
-        border: 0, padding: 0, margin: 0,
-        opacity: editMode ? 1 : 0.92,
-      }}>
-        {tab === 'system' && <SystemTab cfg={cfg} update={update} interfaces={ifacesQ.data || []} />}
-        {tab === 'v2c' && <V2CTab cfg={cfg} update={update} isProd={isProd} />}
-        {tab === 'v3' && <V3Tab cfg={cfg} update={update} />}
-        {tab === 'traps' && <TrapsTab cfg={cfg} update={update} />}
-      </fieldset>
-
-      {!editMode && (
-        <div style={{
-          fontSize: 11, color: 'var(--ink-muted)', marginTop: 10, textAlign: 'right',
-        }}>
-          Click <strong>Edit</strong> to make changes.
-        </div>
-      )}
-
-      {confirmDelete && (
-        <div className="modal-backdrop" onClick={() => !deleteAll.isPending && setConfirmDelete(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 460 }}>
-            <div className="modal-head">
-              <h2 style={{ color: 'var(--danger)' }}>Delete all SNMP config?</h2>
+      {/* ── Engine + Traffic ─────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.3fr', gap: 12, marginBottom: 14 }}>
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">SNMP Engine</span>
+            <span className="card-sub">Engine ID and uptime information</span>
+          </div>
+          <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>Engine ID</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--bg-subtle)', padding: '4px 8px', borderRadius: 4, border: '1px solid var(--line)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {cfg.engine_id || <span style={{ color: 'var(--ink-faint)', fontStyle: 'italic' }}>auto-generated</span>}
+                </code>
+                {cfg.engine_id && (
+                  <button className="btn" style={{ height: 26, padding: '0 8px', fontSize: 11, flexShrink: 0 }}
+                    onClick={() => navigator.clipboard.writeText(cfg.engine_id!)} title="Copy">⎘</button>
+                )}
+              </div>
             </div>
-            <div className="modal-body">
-              <p style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
-                This runs <code style={{
-                  fontFamily: 'var(--font-mono)', fontSize: 12,
-                  background: 'var(--bg-subtle)', padding: '2px 6px', borderRadius: 3,
-                }}>delete service snmp</code> on the device and commits immediately.
-              </p>
-              <p style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
-                Everything below will be removed:
-              </p>
-              <ul style={{ fontSize: 12, color: 'var(--ink-muted)', marginLeft: 20, lineHeight: 1.7 }}>
-                <li>System info (sysContact, sysLocation, sysDescr)</li>
-                <li>Listen addresses, port, VRF</li>
-                <li>{cfg.communities?.length || 0} v2c community string(s)</li>
-                <li>{cfg.v3_users?.length || 0} v3 user(s)</li>
-                <li>{cfg.v3_groups?.length || 0} v3 group(s)</li>
-                <li>{cfg.v3_views?.length || 0} v3 view(s)</li>
-                <li>{cfg.trap_targets?.length || 0} trap destination(s)</li>
-                <li>Engine ID</li>
-              </ul>
-              <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 10 }}>
-                Audit log records this action. You can rollback from the VyOS CLI
-                with <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>rollback 1</code>.
-              </p>
+            <div>
+              <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>SNMP Status</div>
+              <span className="badge ok">Enabled</span>
             </div>
-            <div className="modal-foot">
-              <button className="btn" onClick={() => setConfirmDelete(false)}
-                disabled={deleteAll.isPending}>Cancel</button>
-              <button className="btn btn-danger" onClick={() => deleteAll.mutate()}
-                disabled={deleteAll.isPending}>
-                {deleteAll.isPending ? 'Deleting…' : 'Yes, delete everything'}
-              </button>
+            <div>
+              <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>Engine Boots</div>
+              <div style={{ fontSize: 13 }}>—</div>
+            </div>
+            <div>
+              <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>SNMP Versions</div>
+              <div style={{ display: 'flex', gap: 5 }}>
+                {communities.length > 0 && <span className="badge info" style={{ fontSize: 10 }}>v1</span>}
+                {communities.length > 0 && <span className="badge info" style={{ fontSize: 10 }}>v2c</span>}
+                {v3users.length > 0 && <span className="badge ok" style={{ fontSize: 10 }}>v3</span>}
+                {communities.length === 0 && v3users.length === 0 && <span className="dim">—</span>}
+              </div>
+            </div>
+            <div>
+              <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>Listen port</div>
+              <div className="mono" style={{ fontSize: 13 }}>{cfg.listen_port || 161}</div>
+            </div>
+            <div>
+              <div className="dim" style={{ fontSize: 11, marginBottom: 4 }}>Engine Time</div>
+              <div style={{ fontSize: 13 }}>—</div>
             </div>
           </div>
         </div>
-      )}
-    </>
-  )
-}
 
-// isEmptyConfig returns true if there's nothing meaningful to delete.
-function isEmptyConfig(c: SNMPConfig): boolean {
-  return !c.contact && !c.location && !c.description && !c.vrf && !c.engine_id
-    && (c.listen_addresses?.length || 0) === 0
-    && (c.communities?.length || 0) === 0
-    && (c.v3_users?.length || 0) === 0
-    && (c.v3_groups?.length || 0) === 0
-    && (c.v3_views?.length || 0) === 0
-    && (c.trap_targets?.length || 0) === 0
-}
-
-function SystemTab({ cfg, update, interfaces }: {
-  cfg: SNMPConfig; update: (p: Partial<SNMPConfig>) => void; interfaces: Interface[]
-}) {
-  // Build a flat list of (address, interface, vrf) tuples from device interfaces
-  // so the user picks from the device's actual topology rather than typing.
-  type AddrChoice = { addr: string; iface: string; vrf: string }
-  const choices: AddrChoice[] = []
-  for (const i of interfaces) {
-    for (const a of i.addresses || []) {
-      // Strip CIDR suffix; SNMP listens on a bare IP, not a network.
-      const bare = a.split('/')[0]
-      if (!bare || bare.startsWith('fe80')) continue // skip link-local v6
-      choices.push({ addr: bare, iface: i.name, vrf: i.vrf || '' })
-    }
-  }
-  // VRFs available on the device, with "(default)" as option zero.
-  const vrfs = Array.from(new Set(interfaces.map(i => i.vrf || ''))).sort()
-
-  // Validate: every selected listen address must exist on the device, and
-  // its interface's VRF must match cfg.vrf (or both must be empty/default).
-  const selectedVRF = (cfg.vrf || '').trim()
-  const validation: string[] = []
-  for (const sel of cfg.listen_addresses || []) {
-    const match = choices.find(c => c.addr === sel)
-    if (!match) {
-      validation.push(`${sel} is not configured on any interface of this device.`)
-      continue
-    }
-    if ((match.vrf || '') !== selectedVRF) {
-      validation.push(
-        `${sel} is on ${match.iface} in ${match.vrf ? `VRF "${match.vrf}"` : 'default VRF'}, ` +
-        `but SNMP is bound to ${selectedVRF ? `VRF "${selectedVRF}"` : 'default VRF'}. ` +
-        `Either pick a different address or change the VRF.`
-      )
-    }
-  }
-
-  const toggleAddr = (addr: string) => {
-    const cur = cfg.listen_addresses || []
-    const next = cur.includes(addr) ? cur.filter(a => a !== addr) : [...cur, addr]
-    update({ listen_addresses: next })
-  }
-
-  // When the user picks an address but no VRF set yet, auto-suggest the VRF
-  // of the first selected address. This makes the common path one-click.
-  const autoFillVRF = (addr: string) => {
-    const c = choices.find(x => x.addr === addr)
-    if (c && !cfg.vrf) update({ vrf: c.vrf })
-  }
-
-  return (
-    <section className="card" style={{ padding: 14 }}>
-      <div className="row2">
-        <div className="field"><label>sysContact</label>
-          <input type="text" value={cfg.contact || ''} onChange={e => update({ contact: e.target.value })}
-            placeholder="noc@example.com" /></div>
-        <div className="field"><label>sysLocation</label>
-          <input type="text" value={cfg.location || ''} onChange={e => update({ location: e.target.value })}
-            placeholder="dc1-rack-3" /></div>
-      </div>
-      <div className="field"><label>sysDescr</label>
-        <input type="text" value={cfg.description || ''} onChange={e => update({ description: e.target.value })} /></div>
-
-      <div className="row2">
-        <div className="field"><label>VRF
-          <span className="hint"> (must match the listen address's VRF)</span>
-        </label>
-          <select className="select" value={cfg.vrf || ''}
-            onChange={e => update({ vrf: e.target.value })}>
-            <option value="">(default VRF)</option>
-            {vrfs.filter(v => v !== '').map(v => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
-        </div>
-        <div className="field"><label>Listen port</label>
-          <input type="number" value={cfg.listen_port ?? 161}
-            onChange={e => update({ listen_port: parseInt(e.target.value) || 161 })} /></div>
-      </div>
-
-      <div className="field">
-        <label>Listen addresses <span className="hint">(pick one or more from this device)</span></label>
-        <div style={{
-          border: '1px solid var(--line)', borderRadius: 6,
-          padding: 8, background: 'var(--bg)',
-          maxHeight: 220, overflowY: 'auto',
-        }}>
-          {choices.length === 0 && (
-            <div style={{ padding: 12, color: 'var(--ink-muted)', fontSize: 12 }}>
-              No interface addresses found. Configure an interface first, then revisit this page.
-            </div>
-          )}
-          {choices.map(c => {
-            const checked = (cfg.listen_addresses || []).includes(c.addr)
-            const vrfMatches = (c.vrf || '') === selectedVRF
-            return (
-              <label key={`${c.iface}-${c.addr}`}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '5px 6px', borderRadius: 4, cursor: 'pointer',
-                  background: checked ? 'var(--brand-soft)' : 'transparent',
-                }}>
-                <input type="checkbox" checked={checked}
-                  onChange={() => { toggleAddr(c.addr); if (!checked) autoFillVRF(c.addr) }} />
-                <span className="mono" style={{ fontSize: 12, minWidth: 140 }}>{c.addr}</span>
-                <span className="dim mono" style={{ fontSize: 11 }}>{c.iface}</span>
-                <span style={{
-                  marginLeft: 'auto', fontSize: 10,
-                  padding: '1px 6px', borderRadius: 10,
-                  background: vrfMatches ? 'var(--ok-soft)' : 'var(--warn-soft)',
-                  color: vrfMatches ? 'var(--ok)' : 'var(--warn-ink)',
-                  fontFamily: 'var(--font-mono)',
-                }}>
-                  {c.vrf ? `vrf: ${c.vrf}` : 'default vrf'}
-                </span>
-              </label>
-            )
-          })}
-        </div>
-        {validation.length > 0 && (
-          <div style={{
-            marginTop: 8, padding: '8px 10px', borderRadius: 6,
-            background: 'var(--warn-soft)', color: 'var(--warn-ink)',
-            fontSize: 12, lineHeight: 1.5,
-            borderLeft: '3px solid var(--warn, #e08e00)',
-          }}>
-            <strong>Pre-flight check:</strong>
-            <ul style={{ marginLeft: 18, marginTop: 4 }}>
-              {validation.map((m, i) => <li key={i}>{m}</li>)}
-            </ul>
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">SNMP Traffic</span>
+            <span className="card-sub">Last 5 minutes</span>
           </div>
-        )}
-      </div>
-
-      <div className="field">
-        <label>Engine ID <span className="hint">(hex; required for v3 — auto-generated on commit if blank)</span></label>
-        <input type="text" value={cfg.engine_id || ''} onChange={e => update({ engine_id: e.target.value })}
-          placeholder="leave blank to auto-generate" />
-      </div>
-    </section>
-  )
-}
-
-function V2CTab({ cfg, update, isProd }: { cfg: SNMPConfig; update: (p: Partial<SNMPConfig>) => void; isProd: boolean }) {
-  const comms = cfg.communities || []
-  const add = () => update({ communities: [...comms, { name: '', authorization: 'ro' }] })
-  const edit = (i: number, patch: Partial<SNMPCommunity>) => update({
-    communities: comms.map((c, idx) => idx === i ? { ...c, ...patch } : c)
-  })
-  const remove = (i: number) => update({ communities: comms.filter((_, idx) => idx !== i) })
-
-  return (
-    <>
-      {isProd && (
-        <div style={{
-          background: 'var(--warn-soft)', color: 'var(--warn-ink)',
-          padding: '10px 14px', borderRadius: 6, marginBottom: 12, fontSize: 12,
-        }}>
-          This device is tagged <span className="mono">production</span>. v2c is
-          insecure. Any v2c config here will be rejected on commit — use the v3 tab instead.
-        </div>
-      )}
-      <div className="card">
-        <div className="card-head">
-          <span className="card-title">v2c communities</span>
-          <button className="btn btn-primary" style={{ height: 24, padding: '0 10px', fontSize: 11 }}
-            onClick={add}>+ community</button>
-        </div>
-        <table className="tbl">
-          <thead>
-            <tr><th>Community</th><th>Auth</th><th>Clients</th><th className="right">Actions</th></tr>
-          </thead>
-          <tbody>
-            {comms.map((c, i) => (
-              <tr key={i}>
-                <td><input type="text" value={c.name}
-                  onChange={e => edit(i, { name: cleanStrict(e.target.value) })}
-                  placeholder="public" /></td>
-                <td><select className="select" value={c.authorization || 'ro'}
-                  onChange={e => edit(i, { authorization: e.target.value as 'ro' | 'rw' })}>
-                  <option value="ro">ro</option><option value="rw">rw</option>
-                </select></td>
-                <td><input type="text" value={(c.clients || []).join(', ')}
-                  onChange={e => edit(i, { clients: e.target.value.split(/[,\s]+/).filter(Boolean) })}
-                  placeholder="10.0.0.0/24" /></td>
-                <td className="right">
-                  <button className="btn btn-danger" style={{ height: 24, padding: '0 8px', fontSize: 11 }}
-                    onClick={() => remove(i)}>remove</button>
-                </td>
-              </tr>
-            ))}
-            {comms.length === 0 && (
-              <tr><td colSpan={4} style={{ padding: 20, color: 'var(--ink-muted)' }}>
-                No v2c communities.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </>
-  )
-}
-
-function V3Tab({ cfg, update }: { cfg: SNMPConfig; update: (p: Partial<SNMPConfig>) => void }) {
-  const users = cfg.v3_users || []
-  const groups = cfg.v3_groups || []
-  const views = cfg.v3_views || []
-
-  // First-user adds seed the default view + group, mirroring the canonical
-  // VyOS chain: user → group → view → OID.
-  const addUserWithDefaults = () => {
-    const nextViews = views.some(v => v.name === 'default') ? views
-      : [...views, { name: 'default', oids: ['1'] }]
-    const nextGroups = groups.some(g => g.name === 'default') ? groups
-      : [...groups, { name: 'default', mode: 'ro' as const, sec_level: 'priv', view: 'default' }]
-    update({
-      v3_views: nextViews,
-      v3_groups: nextGroups,
-      v3_users: [...users, {
-        name: '', group: 'default', auth_protocol: 'sha', priv_protocol: 'aes', tp_mode: 'priv',
-      }],
-    })
-  }
-
-  return (
-    <>
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div className="card-head">
-          <span className="card-title">v3 users</span>
-          <button className="btn btn-primary" style={{ height: 24, padding: '0 10px', fontSize: 11 }}
-            onClick={addUserWithDefaults}>+ user</button>
-        </div>
-        <div style={{ padding: 12 }}>
-          {users.length === 0 && (
-            <div style={{ padding: 20, color: 'var(--ink-muted)', textAlign: 'center' }}>
-              No v3 users yet. “+ user” also seeds a default view and group.
+          <div style={{ padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr auto', gap: 16, alignItems: 'center' }}>
+            <div>
+              <div style={{ display: 'flex', gap: 16, marginBottom: 10, fontSize: 11 }}>
+                {[['#185FA5','Queries'],['#1D9E75','Responses'],['#BA7517','Errors']].map(([c,l]) => (
+                  <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 24, height: 2, background: c, display: 'inline-block', borderRadius: 1 }} />
+                    <span className="dim">{l}</span>
+                  </span>
+                ))}
+              </div>
+              <div style={{ height: 90, background: 'var(--bg-subtle)', borderRadius: 6, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span className="dim" style={{ fontSize: 11 }}>Live data requires /snmp/status endpoint</span>
+              </div>
             </div>
-          )}
-          {users.map((u, i) => (
-            <UserCard key={i} user={u} groups={groups}
-              onChange={patch => update({
-                v3_users: users.map((x, idx) => idx === i ? { ...x, ...patch } : x)
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 120 }}>
+              {[['Total Queries','—','var(--ink)'],['Total Responses','—','var(--ink)'],['Errors','—','var(--danger)']].map(([l,v,c]) => (
+                <div key={l}>
+                  <div className="dim" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{l}</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', color: c }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Three-column tables ───────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 14 }}>
+
+        {/* Communities */}
+        <div className="card" ref={refCommunities} style={{ scrollMarginTop: 16 }}>
+          <div className="card-head">
+            <span className="card-title">SNMP Communities <span className="badge" style={{ marginLeft: 6 }}>{communities.length}</span></span>
+            <button className="btn" style={{ height: 26, fontSize: 11, padding: '0 10px' }}
+              onClick={() => setModal({ type: 'community', item: null })}>+ Add</button>
+          </div>
+          <table className="tbl">
+            <thead><tr>
+              <th>Community</th><th>Access</th><th>View</th><th>Version</th><th className="right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {communities.length === 0 && <tr><td colSpan={5}><Empty /></td></tr>}
+              {communities.map((c, i) => (
+                <tr key={i}>
+                  <td className="mono" style={{ fontSize: 12 }}>{c.name}</td>
+                  <td><span className={`badge ${c.authorization === 'ro' ? 'info' : 'warn'}`} style={{ fontSize: 10 }}>{c.authorization || 'ro'}</span></td>
+                  <td style={{ fontSize: 12 }}>default</td>
+                  <td className="dim" style={{ fontSize: 11 }}>v1, v2c</td>
+                  <td className="right">
+                    <RowBtns onEdit={() => setModal({ type: 'community', item: c })} onDelete={() => deleteCommunity(c.name)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {/* "View all" scrolls to the full communities section below */}
+          <ViewAll label="View all communities" onClick={() => scrollTo(refCommunities)} />
+        </div>
+
+        {/* V3 Users */}
+        <div className="card" ref={refUsers} style={{ scrollMarginTop: 16 }}>
+          <div className="card-head">
+            <span className="card-title">SNMP Users (v3) <span className="badge" style={{ marginLeft: 6 }}>{v3users.length}</span></span>
+            <button className="btn" style={{ height: 26, fontSize: 11, padding: '0 10px' }}
+              onClick={() => setModal({ type: 'user', item: null })}>+ Add</button>
+          </div>
+          <table className="tbl">
+            <thead><tr>
+              <th>User</th><th>Security</th><th>Auth Protocol</th><th>Priv Protocol</th><th className="right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {v3users.length === 0 && <tr><td colSpan={5}><Empty /></td></tr>}
+              {v3users.map((u, i) => {
+                const sec = u.auth_protocol ? (u.priv_protocol ? 'authPriv' : 'authNoPriv') : 'noAuthNoPriv'
+                return (
+                  <tr key={i}>
+                    <td className="mono" style={{ fontSize: 12 }}>{u.name}</td>
+                    <td><span className={`badge ${sec === 'authPriv' ? 'ok' : 'info'}`} style={{ fontSize: 9 }}>{sec}</span></td>
+                    <td style={{ fontSize: 12 }}>{u.auth_protocol || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{u.priv_protocol || '—'}</td>
+                    <td className="right">
+                      <RowBtns onEdit={() => setModal({ type: 'user', item: u })} onDelete={() => deleteUser(u.name)} />
+                    </td>
+                  </tr>
+                )
               })}
-              onRemove={() => update({ v3_users: users.filter((_, idx) => idx !== i) })} />
-          ))}
+            </tbody>
+          </table>
+          <ViewAll label="View all users" onClick={() => scrollTo(refUsers)} />
+        </div>
+
+        {/* Trap targets / Allowed Hosts */}
+        <div className="card" ref={refHosts} style={{ scrollMarginTop: 16 }}>
+          <div className="card-head">
+            <span className="card-title">Allowed Hosts <span className="badge" style={{ marginLeft: 6 }}>{traps.length}</span></span>
+            <button className="btn" style={{ height: 26, fontSize: 11, padding: '0 10px' }}
+              onClick={() => setModal({ type: 'trap', item: null })}>+ Add</button>
+          </div>
+          <table className="tbl">
+            <thead><tr>
+              <th>Host / Network</th><th>Version</th><th>Type</th><th className="right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {traps.length === 0 && <tr><td colSpan={4}><Empty /></td></tr>}
+              {traps.map((t, i) => (
+                <tr key={i}>
+                  <td className="mono" style={{ fontSize: 12 }}>{t.address}</td>
+                  <td><span className="badge" style={{ fontSize: 10 }}>{t.version}</span></td>
+                  <td style={{ fontSize: 12 }}>{t.address?.includes('/') ? 'Network' : 'Host'}</td>
+                  <td className="right">
+                    <RowBtns onEdit={() => setModal({ type: 'trap', item: t })} onDelete={() => deleteTrap(t.address)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ViewAll label="View all allowed hosts" onClick={() => scrollTo(refHosts)} />
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div className="card-head">
-          <span className="card-title">v3 groups <span className="hint">(bind security level + view)</span></span>
-          <button className="btn" style={{ height: 24, padding: '0 10px', fontSize: 11 }}
-            onClick={() => update({ v3_groups: [...groups, {
-              name: '', mode: 'ro', sec_level: 'priv', view: 'default',
-            }] })}>+ group</button>
+      {/* ── Views + Events ───────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+
+        <div className="card" ref={refViews} style={{ scrollMarginTop: 16 }}>
+          <div className="card-head">
+            <span className="card-title">SNMP Views <span className="badge" style={{ marginLeft: 6 }}>{v3views.length}</span></span>
+            <button className="btn" style={{ height: 26, fontSize: 11, padding: '0 10px' }}
+              onClick={() => setModal({ type: 'view', item: null })}>+ Add view</button>
+          </div>
+          <table className="tbl">
+            <thead><tr>
+              <th>View name</th><th>OID subtree</th><th>Type</th><th>Description</th><th className="right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {v3views.length === 0 && <tr><td colSpan={5}><Empty /></td></tr>}
+              {v3views.map((v, i) => (
+                <tr key={i}>
+                  <td style={{ fontSize: 12 }}>{v.name}</td>
+                  <td className="mono" style={{ fontSize: 11 }}>{v.oids?.join(', ') || '1.3.6.1'}</td>
+                  <td><span className={`badge ${v.exclude ? 'danger' : 'ok'}`} style={{ fontSize: 9 }}>{v.exclude ? 'excluded' : 'included'}</span></td>
+                  <td className="dim" style={{ fontSize: 11 }}>
+                    {v.name === 'default' ? 'Full access to all standard MIBs'
+                      : v.name === 'restricted' ? 'System information and interfaces only' : '—'}
+                  </td>
+                  <td className="right">
+                    <RowBtns onEdit={() => setModal({ type: 'view', item: v })} onDelete={() => deleteView(v.name)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ViewAll label="View all views" onClick={() => scrollTo(refViews)} />
         </div>
-        <table className="tbl">
-          <thead><tr>
-            <th style={{ width: '25%' }}>Name</th>
-            <th style={{ width: '15%' }}>Mode</th>
-            <th style={{ width: '15%' }}>Security</th>
-            <th style={{ width: '30%' }}>View</th>
-            <th className="right" style={{ width: '15%' }}>Actions</th>
-          </tr></thead>
-          <tbody>
-            {groups.map((g, i) => (
-              <tr key={i}>
-                <td><input type="text" value={g.name}
-                  onChange={e => update({ v3_groups: groups.map((x, idx) =>
-                    idx === i ? { ...x, name: cleanStrict(e.target.value) } : x) })} /></td>
-                <td><select className="select" value={g.mode}
-                  onChange={e => update({ v3_groups: groups.map((x, idx) =>
-                    idx === i ? { ...x, mode: e.target.value as 'ro' | 'rw' } : x) })}>
-                  <option value="ro">ro</option><option value="rw">rw</option>
-                </select></td>
-                <td><select className="select" value={g.sec_level || 'priv'}
-                  onChange={e => update({ v3_groups: groups.map((x, idx) =>
-                    idx === i ? { ...x, sec_level: e.target.value } : x) })}>
-                  <option value="priv">priv</option>
-                  <option value="auth">auth</option>
-                </select></td>
-                <td><select className="select" value={g.view || ''}
-                  onChange={e => update({ v3_groups: groups.map((x, idx) =>
-                    idx === i ? { ...x, view: e.target.value } : x) })}>
-                  <option value="">(pick a view)</option>
-                  {views.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
-                </select></td>
-                <td className="right">
-                  <button className="btn btn-danger" style={{ height: 24, padding: '0 8px', fontSize: 11 }}
-                    onClick={() => update({ v3_groups: groups.filter((_, idx) => idx !== i) })}>remove</button>
-                </td>
-              </tr>
-            ))}
-            {groups.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: 20, color: 'var(--ink-muted)' }}>No groups.</td></tr>
-            )}
-          </tbody>
-        </table>
+
+        <div className="card" ref={refEvents} style={{ scrollMarginTop: 16 }}>
+          <div className="card-head">
+            <span className="card-title">Recent SNMP Events</span>
+            <button className="btn" style={{ height: 26, fontSize: 11, padding: '0 10px', background: 'transparent', border: 'none', color: 'var(--brand)', cursor: 'pointer' }}
+              onClick={() => scrollTo(refEvents)}>View all →</button>
+          </div>
+          <table className="tbl">
+            <thead><tr><th>Time</th><th>Event</th><th>Source</th><th>Details</th></tr></thead>
+            <tbody><tr><td colSpan={4}><Empty text="No events — backend /snmp/events endpoint not yet implemented" /></td></tr></tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <span className="card-title">v3 views <span className="hint">(filter which OIDs are exposed)</span></span>
-          <button className="btn" style={{ height: 24, padding: '0 10px', fontSize: 11 }}
-            onClick={() => update({ v3_views: [...views, { name: '', oids: ['1'] }] })}>+ view</button>
-        </div>
-        <table className="tbl">
-          <thead><tr>
-            <th style={{ width: '30%' }}>Name</th>
-            <th style={{ width: '55%' }}>OIDs <span className="hint">(comma-separated)</span></th>
-            <th className="right" style={{ width: '15%' }}>Actions</th>
-          </tr></thead>
-          <tbody>
-            {views.map((v, i) => (
-              <tr key={i}>
-                <td><input type="text" value={v.name}
-                  onChange={e => update({ v3_views: views.map((x, idx) =>
-                    idx === i ? { ...x, name: cleanStrict(e.target.value) } : x) })} /></td>
-                <td><input type="text" value={(v.oids || []).join(', ')}
-                  onChange={e => update({ v3_views: views.map((x, idx) =>
-                    idx === i ? { ...x, oids: e.target.value.split(/[,\s]+/).filter(Boolean) } : x) })}
-                  placeholder="1   (entire tree)    or    1.3.6.1.2.1" /></td>
-                <td className="right">
-                  <button className="btn btn-danger" style={{ height: 24, padding: '0 8px', fontSize: 11 }}
-                    onClick={() => update({ v3_views: views.filter((_, idx) => idx !== i) })}>remove</button>
-                </td>
-              </tr>
-            ))}
-            {views.length === 0 && (
-              <tr><td colSpan={3} style={{ padding: 20, color: 'var(--ink-muted)' }}>
-                No views. Each group needs one. “1” means the entire OID tree.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* ── Modals ─────────────────────────────────── */}
+      {modal?.type === 'community' && (
+        <CommunityModal item={modal.item} saving={save.isPending} onSave={saveCommunity} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'user' && (
+        <UserModal item={modal.item} saving={save.isPending} onSave={saveUser} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'view' && (
+        <ViewModal item={modal.item} saving={save.isPending} onSave={saveView} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'trap' && (
+        <TrapModal item={modal.item} saving={save.isPending} onSave={saveTrap} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === 'deleteAll' && (
+        <ConfirmModal
+          title="Delete all SNMP configuration?"
+          body="This will remove all communities, users, views, and trap targets from the device. This cannot be undone."
+          danger saving={deleteAll.isPending}
+          onConfirm={() => deleteAll.mutate()} onClose={() => setModal(null)}
+        />
+      )}
     </>
   )
 }
 
-function UserCard({ user, groups, onChange, onRemove }: {
-  user: SNMPV3User; groups: SNMPV3Group[];
-  onChange: (p: Partial<SNMPV3User>) => void; onRemove: () => void;
+// ─── Community modal ──────────────────────────────────────────
+function CommunityModal({ item, saving, onSave, onClose }: {
+  item: SNMPCommunity | null; saving: boolean
+  onSave: (c: SNMPCommunity, orig: SNMPCommunity | null) => void; onClose: () => void
+}) {
+  const [name, setName]       = useState(item?.name ?? '')
+  const [auth, setAuth]       = useState<'ro'|'rw'>(item?.authorization ?? 'ro')
+  const [networks, setNets]   = useState((item?.network ?? []).join('\n'))
+
+  return (
+    <Backdrop onClose={onClose}>
+      <div className="modal-head"><strong>{item ? 'Edit community' : 'Add community'}</strong><button className="btn" onClick={onClose}>✕</button></div>
+      <div className="modal-body">
+        <Field label="Community name">
+          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="public" disabled={!!item} />
+        </Field>
+        <Field label="Access">
+          <select value={auth} onChange={e => setAuth(e.target.value as 'ro'|'rw')}
+            style={{ width: '100%', height: 32, padding: '0 10px', border: '1px solid var(--line-strong)', borderRadius: 'var(--radius)', fontSize: 13, background: 'var(--bg)' }}>
+            <option value="ro">ro — read-only</option>
+            <option value="rw">rw — read-write</option>
+          </select>
+        </Field>
+        <Field label="Allowed networks (one per line, blank = any)">
+          <textarea value={networks} onChange={e => setNets(e.target.value)} placeholder={"192.168.1.0/24\n10.0.0.0/8"} rows={3} />
+        </Field>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" disabled={!name || saving}
+          onClick={() => onSave({ name, authorization: auth, network: networks.split('\n').map(s=>s.trim()).filter(Boolean) }, item)}>
+          {saving ? 'Saving…' : item ? 'Save changes' : 'Add community'}
+        </button>
+      </div>
+    </Backdrop>
+  )
+}
+
+// ─── V3 User modal ────────────────────────────────────────────
+function UserModal({ item, saving, onSave, onClose }: {
+  item: SNMPV3User | null; saving: boolean
+  onSave: (u: SNMPV3User, orig: SNMPV3User | null) => void; onClose: () => void
+}) {
+  const [name, setName]       = useState(item?.name ?? '')
+  const [group, setGroup]     = useState(item?.group ?? '')
+  const [authProto, setAuthP] = useState(item?.auth_protocol ?? '')
+  const [authPass, setAuthPw] = useState('')
+  const [privProto, setPrivP] = useState(item?.priv_protocol ?? '')
+  const [privPass, setPrivPw] = useState('')
+
+  return (
+    <Backdrop onClose={onClose}>
+      <div className="modal-head"><strong>{item ? 'Edit v3 user' : 'Add v3 user'}</strong><button className="btn" onClick={onClose}>✕</button></div>
+      <div className="modal-body">
+        <div className="row2">
+          <Field label="Username"><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="snmp-admin" disabled={!!item} /></Field>
+          <Field label="Group (optional)"><input type="text" value={group} onChange={e => setGroup(e.target.value)} placeholder="snmp-ro" /></Field>
+        </div>
+        <div className="row2">
+          <Field label="Auth protocol">
+            <select value={authProto} onChange={e => setAuthP(e.target.value)}
+              style={{ width: '100%', height: 32, padding: '0 10px', border: '1px solid var(--line-strong)', borderRadius: 'var(--radius)', fontSize: 13, background: 'var(--bg)' }}>
+              <option value="">None</option>
+              <option>MD5</option><option>SHA</option><option>SHA-224</option><option>SHA-256</option><option>SHA-384</option><option>SHA-512</option>
+            </select>
+          </Field>
+          <Field label="Auth password"><input type="password" value={authPass} onChange={e => setAuthPw(e.target.value)} placeholder={item ? '(unchanged)' : 'min 8 chars'} disabled={!authProto} /></Field>
+        </div>
+        <div className="row2">
+          <Field label="Privacy protocol">
+            <select value={privProto} onChange={e => setPrivP(e.target.value)} disabled={!authProto}
+              style={{ width: '100%', height: 32, padding: '0 10px', border: '1px solid var(--line-strong)', borderRadius: 'var(--radius)', fontSize: 13, background: 'var(--bg)' }}>
+              <option value="">None</option>
+              <option>DES</option><option>AES</option><option>AES-128</option><option>AES-192</option><option>AES-256</option>
+            </select>
+          </Field>
+          <Field label="Privacy password"><input type="password" value={privPass} onChange={e => setPrivPw(e.target.value)} placeholder={item ? '(unchanged)' : 'min 8 chars'} disabled={!privProto} /></Field>
+        </div>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" disabled={!name || saving} onClick={() => onSave({
+          name, group: group || undefined,
+          auth_protocol: authProto || undefined, auth_password: authPass || undefined,
+          priv_protocol: privProto || undefined, priv_password: privPass || undefined,
+        }, item)}>
+          {saving ? 'Saving…' : item ? 'Save changes' : 'Add user'}
+        </button>
+      </div>
+    </Backdrop>
+  )
+}
+
+// ─── View modal ───────────────────────────────────────────────
+function ViewModal({ item, saving, onSave, onClose }: {
+  item: SNMPV3View | null; saving: boolean
+  onSave: (v: SNMPV3View, orig: SNMPV3View | null) => void; onClose: () => void
+}) {
+  const [name, setName] = useState(item?.name ?? '')
+  const [oids, setOids] = useState((item?.oids ?? ['1.3.6.1']).join('\n'))
+  const [excl, setExcl] = useState(item?.exclude ?? false)
+
+  return (
+    <Backdrop onClose={onClose}>
+      <div className="modal-head"><strong>{item ? 'Edit view' : 'Add view'}</strong><button className="btn" onClick={onClose}>✕</button></div>
+      <div className="modal-body">
+        <Field label="View name"><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="default" disabled={!!item} /></Field>
+        <Field label="OID subtrees (one per line)"><textarea value={oids} onChange={e => setOids(e.target.value)} placeholder={"1.3.6.1\n1.3.6.1.2.1.1"} rows={3} /></Field>
+        <Field label="Type">
+          <div style={{ display: 'flex', gap: 16, marginTop: 4 }}>
+            {(['included','excluded'] as const).map(v => (
+              <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                <input type="radio" checked={excl === (v === 'excluded')} onChange={() => setExcl(v === 'excluded')} />
+                {v}
+              </label>
+            ))}
+          </div>
+        </Field>
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" disabled={!name || saving}
+          onClick={() => onSave({ name, oids: oids.split('\n').map(s=>s.trim()).filter(Boolean), exclude: excl }, item)}>
+          {saving ? 'Saving…' : item ? 'Save changes' : 'Add view'}
+        </button>
+      </div>
+    </Backdrop>
+  )
+}
+
+// ─── Trap modal ───────────────────────────────────────────────
+function TrapModal({ item, saving, onSave, onClose }: {
+  item: SNMPTrapTarget | null; saving: boolean
+  onSave: (t: SNMPTrapTarget, orig: SNMPTrapTarget | null) => void; onClose: () => void
+}) {
+  const [addr, setAddr]     = useState(item?.address ?? '')
+  const [port, setPort]     = useState(String(item?.port ?? 162))
+  const [ver, setVer]       = useState<'v2c'|'v3'>(item?.version ?? 'v2c')
+  const [community, setCom] = useState(item?.community ?? '')
+  const [v3user, setV3u]    = useState(item?.v3_user ?? '')
+
+  return (
+    <Backdrop onClose={onClose}>
+      <div className="modal-head"><strong>{item ? 'Edit trap destination' : 'Add trap destination'}</strong><button className="btn" onClick={onClose}>✕</button></div>
+      <div className="modal-body">
+        <div className="row2">
+          <Field label="Address"><input type="text" value={addr} onChange={e => setAddr(e.target.value)} placeholder="192.168.1.100" disabled={!!item} /></Field>
+          <Field label="Port"><input type="text" value={port} onChange={e => setPort(e.target.value)} placeholder="162" /></Field>
+        </div>
+        <Field label="Version">
+          <div style={{ display: 'flex', gap: 16, marginTop: 4 }}>
+            {(['v2c','v3'] as const).map(v => (
+              <label key={v} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                <input type="radio" checked={ver === v} onChange={() => setVer(v)} />{v}
+              </label>
+            ))}
+          </div>
+        </Field>
+        {ver === 'v2c' && <Field label="Community"><input type="text" value={community} onChange={e => setCom(e.target.value)} placeholder="public" /></Field>}
+        {ver === 'v3'  && <Field label="v3 username"><input type="text" value={v3user} onChange={e => setV3u(e.target.value)} placeholder="snmp-admin" /></Field>}
+      </div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" disabled={!addr || saving}
+          onClick={() => onSave({ address: addr, port: Number(port) || 162, version: ver,
+            community: ver === 'v2c' ? community : undefined,
+            v3_user: ver === 'v3' ? v3user : undefined }, item)}>
+          {saving ? 'Saving…' : item ? 'Save changes' : 'Add destination'}
+        </button>
+      </div>
+    </Backdrop>
+  )
+}
+
+// ─── Confirm modal ────────────────────────────────────────────
+function ConfirmModal({ title, body, danger, saving, onConfirm, onClose }: {
+  title: string; body: string; danger?: boolean; saving: boolean; onConfirm: () => void; onClose: () => void
 }) {
   return (
-    <div style={{
-      border: '1px solid var(--line)', borderRadius: 6, padding: 12, marginBottom: 10,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span className="mono" style={{ fontSize: 12, fontWeight: 500 }}>
-          {user.name || '(unnamed user)'}
-        </span>
-        <button className="btn btn-danger" style={{ height: 22, padding: '0 8px', fontSize: 11 }}
-          onClick={onRemove}>remove</button>
+    <Backdrop onClose={onClose}>
+      <div className="modal-head"><strong>{title}</strong></div>
+      <div className="modal-body"><p style={{ margin: 0, fontSize: 13 }}>{body}</p></div>
+      <div className="modal-foot">
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} disabled={saving} onClick={onConfirm}>
+          {saving ? 'Deleting…' : 'Yes, delete all'}
+        </button>
       </div>
-      <div className="row2">
-        <div className="field">
-          <label>Name <span className="hint">(letters, digits, underscore)</span></label>
-          <input type="text" value={user.name}
-            onChange={e => onChange({ name: cleanStrict(e.target.value) })}
-            placeholder="nwmgmt_ro_only" />
-        </div>
-        <div className="field"><label>Group</label>
-          <select className="select" value={user.group || ''}
-            onChange={e => onChange({ group: e.target.value })}>
-            <option value="">(pick a group)</option>
-            {groups.map(g => <option key={g.name} value={g.name}>{g.name} ({g.mode})</option>)}
-          </select>
-        </div>
-      </div>
-      <div className="row2">
-        <div className="field"><label>Auth protocol</label>
-          <select className="select" value={user.auth_protocol || 'sha'}
-            onChange={e => onChange({ auth_protocol: e.target.value })}>
-            <option value="sha">SHA (recommended)</option>
-            <option value="md5" disabled>MD5 (deprecated — rejected)</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Auth password
-            <span className="hint">{user.auth_encrypted ? ' — already configured' : ' (min 8 chars)'}</span>
-          </label>
-          {user.auth_encrypted && !user.auth_password ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span className="dim mono" style={{ fontSize: 12 }}>•••••••••• (encrypted on device)</span>
-              <button type="button" className="btn"
-                style={{ height: 22, padding: '0 8px', fontSize: 11 }}
-                onClick={() => onChange({ auth_encrypted: '' })}>rotate</button>
-            </div>
-          ) : (
-            <input type="password" value={user.auth_password || ''}
-              onChange={e => onChange({ auth_password: e.target.value })}
-              placeholder="enter password (min 8 chars)"
-              minLength={8} />
-          )}
-        </div>
-      </div>
-      <div className="row2">
-        <div className="field"><label>Privacy protocol</label>
-          <select className="select" value={user.priv_protocol || 'aes'}
-            onChange={e => onChange({ priv_protocol: e.target.value })}>
-            <option value="aes">AES (AES-128)</option>
-            <option value="des">DES (deprecated)</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Privacy password
-            <span className="hint">{user.priv_encrypted ? ' — already configured' : ' (min 8 chars)'}</span>
-          </label>
-          {user.priv_encrypted && !user.priv_password ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span className="dim mono" style={{ fontSize: 12 }}>•••••••••• (encrypted on device)</span>
-              <button type="button" className="btn"
-                style={{ height: 22, padding: '0 8px', fontSize: 11 }}
-                onClick={() => onChange({ priv_encrypted: '' })}>rotate</button>
-            </div>
-          ) : (
-            <input type="password" value={user.priv_password || ''}
-              onChange={e => onChange({ priv_password: e.target.value })}
-              placeholder="enter password (min 8 chars)"
-              minLength={8} />
-          )}
-        </div>
-      </div>
-      <div className="field"><label>Security level</label>
-        <select className="select" value={user.tp_mode || 'priv'}
-          onChange={e => onChange({ tp_mode: e.target.value })}>
-          <option value="priv">authPriv (recommended)</option>
-          <option value="auth">authNoPriv</option>
-          <option value="no-auth">noAuthNoPriv (insecure)</option>
-        </select>
-      </div>
-    </div>
+    </Backdrop>
   )
 }
 
-function TrapsTab({ cfg, update }: { cfg: SNMPConfig; update: (p: Partial<SNMPConfig>) => void }) {
-  const traps = cfg.trap_targets || []
-  const add = () => update({ trap_targets: [...traps, { address: '', version: 'v3', type: 'trap' }] })
-  const edit = (i: number, patch: Partial<SNMPTrapTarget>) => update({
-    trap_targets: traps.map((t, idx) => idx === i ? { ...t, ...patch } : t)
-  })
-  const remove = (i: number) => update({ trap_targets: traps.filter((_, idx) => idx !== i) })
-
+// ─── Shared pieces ────────────────────────────────────────────
+function Backdrop({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
-    <div className="card">
-      <div className="card-head">
-        <span className="card-title">Trap destinations</span>
-        <button className="btn btn-primary" style={{ height: 24, padding: '0 10px', fontSize: 11 }}
-          onClick={add}>+ trap target</button>
-      </div>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>Address</th><th>Port</th><th>Version</th><th>Type</th><th>Credential</th>
-            <th className="right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {traps.map((t, i) => (
-            <tr key={i}>
-              <td><input type="text" value={t.address}
-                onChange={e => edit(i, { address: e.target.value })}
-                placeholder="10.0.50.5 or splunk.internal" /></td>
-              <td style={{ width: 80 }}><input type="number" value={t.port ?? 162}
-                onChange={e => edit(i, { port: parseInt(e.target.value) || 162 })} /></td>
-              <td style={{ width: 90 }}>
-                <select className="select" value={t.version}
-                  onChange={e => edit(i, { version: e.target.value as any })}>
-                  <option value="v3">v3</option>
-                  <option value="v2c">v2c</option>
-                </select>
-              </td>
-              <td style={{ width: 100 }}>
-                <select className="select" value={t.type || 'trap'}
-                  onChange={e => edit(i, { type: e.target.value as any })}>
-                  <option value="trap">trap</option>
-                  <option value="inform">inform</option>
-                </select>
-              </td>
-              <td>
-                {t.version === 'v2c'
-                  ? <input type="text" value={t.community || ''}
-                      onChange={e => edit(i, { community: cleanStrict(e.target.value) })}
-                      placeholder="community" />
-                  : <input type="text" value={t.v3_user || ''}
-                      onChange={e => edit(i, { v3_user: cleanStrict(e.target.value) })}
-                      placeholder="v3 user name" />}
-              </td>
-              <td className="right">
-                <button className="btn btn-danger" style={{ height: 24, padding: '0 8px', fontSize: 11 }}
-                  onClick={() => remove(i)}>remove</button>
-              </td>
-            </tr>
-          ))}
-          {traps.length === 0 && (
-            <tr><td colSpan={6} style={{ padding: 20, color: 'var(--ink-muted)' }}>
-              No trap destinations.
-            </td></tr>
-          )}
-        </tbody>
-      </table>
+    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">{children}</div>
     </div>
   )
 }
 
-function subTabStyle(active: boolean): React.CSSProperties {
-  return {
-    padding: '8px 14px', fontSize: 13,
-    color: active ? 'var(--brand)' : 'var(--ink-muted)',
-    fontWeight: active ? 500 : 400,
-    borderBottom: active ? '2px solid var(--brand)' : '2px solid transparent',
-    marginBottom: -1,
-    background: 'transparent', border: 'none', cursor: 'pointer',
-    whiteSpace: 'nowrap',
-  }
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="field"><label>{label}</label>{children}</div>
 }
-function label(t: SnmpTab) {
-  return t === 'v2c' ? 'SNMPv2c'
-    : t === 'v3' ? 'SNMPv3'
-    : t === 'traps' ? 'Trap destinations'
-    : 'System info'
+
+function Empty({ text = 'None configured' }: { text?: string }) {
+  return <div style={{ padding: '16px 14px', textAlign: 'center', color: 'var(--ink-muted)', fontSize: 12 }}>{text}</div>
 }
-function badge(t: SnmpTab, c: SNMPConfig) {
-  const n = t === 'v2c' ? c.communities?.length
-    : t === 'v3' ? (c.v3_users?.length || 0) + (c.v3_groups?.length || 0) + (c.v3_views?.length || 0)
-    : t === 'traps' ? c.trap_targets?.length
-    : undefined
-  if (!n) return null
-  return <span style={{
-    marginLeft: 6, padding: '1px 6px', borderRadius: 10,
-    background: 'var(--brand-soft)', color: 'var(--brand-ink)',
-    fontSize: 10, fontFamily: 'var(--font-mono)',
-  }}>{n}</span>
+
+// "View all" now accepts an onClick — scrolls to the relevant section
+function ViewAll({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <div style={{ padding: '8px 14px', borderTop: '1px solid var(--line)' }}>
+      <button
+        onClick={onClick}
+        style={{ background: 'none', border: 'none', padding: 0, fontSize: 12, color: 'var(--brand)', cursor: 'pointer', fontFamily: 'inherit' }}
+      >
+        {label} →
+      </button>
+    </div>
+  )
 }
+
+function RowBtns({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  return (
+    <span style={{ display: 'inline-flex', gap: 4 }}>
+      <button className="btn" style={{ height: 24, padding: '0 8px', fontSize: 12 }}
+        onClick={e => { e.stopPropagation(); onEdit() }}>✏</button>
+      <button className="btn btn-danger" style={{ height: 24, padding: '0 8px', fontSize: 12 }}
+        onClick={e => { e.stopPropagation(); if (confirm('Delete this item?')) onDelete() }}>✕</button>
+    </span>
+  )
+}
+
+// ─── Metric card ─────────────────────────────────────────────
+function MetricCard({ icon, value, label, sub, color, bg, onClick }: {
+  icon: React.ReactNode; value: number | string; label: string; sub: string
+  color: string; bg: string; onClick?: () => void
+}) {
+  return (
+    <div className="card" style={{ padding: 0, cursor: onClick ? 'pointer' : 'default' }} onClick={onClick}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 18px' }}>
+        <div style={{ width: 48, height: 48, borderRadius: 12, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color }}>
+          {icon}
+        </div>
+        <div>
+          <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.1, fontFamily: 'var(--font-mono)' }}>{value}</div>
+          <div style={{ fontSize: 13, fontWeight: 500, marginTop: 2 }}>{label}</div>
+          <div style={{ fontSize: 11, color: 'var(--ink-faint)', marginTop: 1 }}>{sub}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Icons ────────────────────────────────────────────────────
+function IconGrid()    { return <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> }
+function IconUsers()   { return <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a6 6 0 0 1 12 0v2"/><path d="M17 11a3 3 0 1 1 0-6"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg> }
+function IconMonitor() { return <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> }
+function IconBell()    { return <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> }
+function IconShield()  { return <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg> }

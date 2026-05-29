@@ -1,0 +1,538 @@
+// Package simulation implements the rule simulation and shadow detection engine
+// for vyos-cp. It evaluates VyOS firewall rules in exact execution order and
+// identifies unreachable, shadowed, or risky rule configurations.
+package simulation
+
+import (
+	"fmt"
+	"net"
+	"strconv"
+	"strings"
+
+	"github.com/vyos-cp/vyos-cp/internal/model"
+)
+
+// ─── Packet ──────────────────────────────────────────────────────────────────
+
+// Packet represents a simulated network packet used as the evaluation subject.
+type Packet struct {
+	SrcIP    string `json:"src_ip"`    // e.g. "8.8.8.8"
+	DstIP    string `json:"dst_ip"`    // e.g. "142.79.253.233"
+	Proto    string `json:"proto"`     // "tcp", "udp", "icmp", "any"
+	DstPort  int    `json:"dst_port"`  // 0 = any
+	InIface  string `json:"in_iface"`  // ingress interface, e.g. "eth0"
+	OutIface string `json:"out_iface"` // egress interface
+	State    string `json:"state"`     // "new", "established", "related", "invalid"
+	GeoCode  string `json:"geo_code"`  // ISO-3166-1 alpha-2, e.g. "CN"
+}
+
+// ─── TraceEntry ──────────────────────────────────────────────────────────────
+
+// EvalStatus describes how a rule was treated during packet evaluation.
+type EvalStatus string
+
+const (
+	StatusMatch   EvalStatus = "match"
+	StatusNoMatch EvalStatus = "no_match"
+	StatusNotEval EvalStatus = "not_evaluated" // rule after the first match
+)
+
+// TraceEntry records one step in the simulation walk.
+type TraceEntry struct {
+	Rule    model.Rule `json:"rule"`    // snapshot of the evaluated rule
+	Status  EvalStatus `json:"status"`
+	Reasons []string   `json:"reasons"` // human-readable match explanations
+}
+
+// ─── SimulationResult ────────────────────────────────────────────────────────
+
+// SimulationResult is the top-level output of RunSimulation.
+type SimulationResult struct {
+	Packet      Packet       `json:"packet"`
+	Matched     bool         `json:"matched"`
+	MatchedRule *model.Rule  `json:"matched_rule"` // nil when no rule matched
+	FinalAction string       `json:"final_action"` // "accept", "drop", "reject", "" when no match
+	Trace       []TraceEntry `json:"trace"`
+}
+
+// ─── Engine ──────────────────────────────────────────────────────────────────
+
+// Engine holds the rule-set and performs simulation + shadow analysis.
+type Engine struct {
+	Rules []model.Rule // ordered by rule number ascending
+}
+
+// NewEngine constructs an Engine from an ordered rule slice.
+func NewEngine(rules []model.Rule) *Engine {
+	return &Engine{Rules: rules}
+}
+
+// RunSimulation evaluates pkt against every rule in order and returns a full
+// trace plus the first matching rule.
+func (e *Engine) RunSimulation(pkt Packet) SimulationResult {
+	result := SimulationResult{Packet: pkt}
+	for _, rule := range e.Rules {
+		entry := TraceEntry{Rule: rule}
+		if rule.Disable {
+			entry.Status = StatusNoMatch
+			entry.Reasons = []string{"rule disabled"}
+			result.Trace = append(result.Trace, entry)
+			continue
+		}
+		if result.Matched {
+			entry.Status = StatusNotEval
+			result.Trace = append(result.Trace, entry)
+			continue
+		}
+		reasons, matched := e.matchRule(rule, pkt)
+		if matched {
+			entry.Status = StatusMatch
+			entry.Reasons = reasons
+			result.Matched = true
+			ruleCopy := rule
+			result.MatchedRule = &ruleCopy
+			result.FinalAction = string(rule.Action)
+		} else {
+			entry.Status = StatusNoMatch
+		}
+		result.Trace = append(result.Trace, entry)
+	}
+	return result
+}
+
+// matchRule returns (reasons, true) when rule matches pkt.
+func (e *Engine) matchRule(rule model.Rule, pkt Packet) ([]string, bool) {
+	var reasons []string
+
+	// Protocol ("all"/"any"/"" are wildcards)
+	if !isAnyProto(rule.Protocol) {
+		if rule.Protocol != pkt.Proto {
+			return nil, false
+		}
+		reasons = append(reasons, rule.Protocol+" protocol match")
+	}
+
+	// Destination port (string spec: "443", "80,443", "1000-2000")
+	if rule.Destination != nil && rule.Destination.Port != "" {
+		if !portMatches(rule.Destination.Port, pkt.DstPort) {
+			return nil, false
+		}
+		reasons = append(reasons, fmt.Sprintf("destination port %d match", pkt.DstPort))
+	}
+
+	// Source address / CIDR
+	if rule.Source != nil && rule.Source.Address != "" && !isAnyCIDR(rule.Source.Address) {
+		if !addrMatches(rule.Source.Address, pkt.SrcIP) {
+			return nil, false
+		}
+		reasons = append(reasons, "source address match")
+	}
+
+	// Destination address / CIDR
+	if rule.Destination != nil && rule.Destination.Address != "" && !isAnyCIDR(rule.Destination.Address) {
+		if !addrMatches(rule.Destination.Address, pkt.DstIP) {
+			return nil, false
+		}
+		reasons = append(reasons, "destination address match")
+	}
+
+	// GeoIP (source or destination country lists)
+	if len(rule.SourceCountries) > 0 {
+		if !containsStr(rule.SourceCountries, pkt.GeoCode) && rule.Action == model.ActionDrop {
+			return nil, false
+		}
+		reasons = append(reasons, "source GeoIP country match")
+	}
+	if len(rule.DestinationCountries) > 0 {
+		if !containsStr(rule.DestinationCountries, pkt.GeoCode) && rule.Action == model.ActionDrop {
+			return nil, false
+		}
+		reasons = append(reasons, "destination GeoIP country match")
+	}
+
+	// Connection state (boolean flags)
+	if rule.State != nil && hasAnyState(rule.State) && pkt.State != "" {
+		if !stateMatches(rule.State, pkt.State) {
+			return nil, false
+		}
+		reasons = append(reasons, "connection state match")
+	}
+
+	if len(reasons) == 0 {
+		reasons = []string{"wildcard match (any source, any destination)"}
+	}
+	return reasons, true
+}
+
+// ─── Shadow detection ────────────────────────────────────────────────────────
+
+// RiskLevel categorises a finding.
+type RiskLevel string
+
+const (
+	RiskCritical RiskLevel = "critical" // rule is completely unreachable
+	RiskHigh     RiskLevel = "high"     // serious security concern
+	RiskMedium   RiskLevel = "medium"   // broad or potentially unsafe rule
+	RiskLow      RiskLevel = "low"      // informational
+)
+
+// Finding describes one detected issue in the rule-set.
+type Finding struct {
+	Level      RiskLevel `json:"level"`
+	RuleNum    int       `json:"rule_num"`
+	RelatedNum int       `json:"related_num"` // secondary rule (e.g. the shadowing rule), 0 if N/A
+	Code       string    `json:"code"`        // "shadowed", "allow_any", "broad_geo", ...
+	Title      string    `json:"title"`
+	Detail     string    `json:"detail"`
+}
+
+// AnalyzeRuleSet runs all shadow and risk checks against the full rule set.
+func (e *Engine) AnalyzeRuleSet() []Finding {
+	var findings []Finding
+	findings = append(findings, e.detectShadows()...)
+	findings = append(findings, e.detectRiskyRules()...)
+	return findings
+}
+
+// detectShadows finds rules unreachable because an earlier rule handles all
+// their traffic.
+func (e *Engine) detectShadows() []Finding {
+	var findings []Finding
+	for i, candidate := range e.Rules {
+		if candidate.Disable {
+			continue
+		}
+		for _, prior := range e.Rules[:i] {
+			if prior.Disable {
+				continue
+			}
+			if shadows(prior, candidate) {
+				findings = append(findings, Finding{
+					Level:      RiskCritical,
+					RuleNum:    candidate.Number,
+					RelatedNum: prior.Number,
+					Code:       "shadowed",
+					Title:      "Shadowed rule — unreachable",
+					Detail: fmt.Sprintf(
+						"Rule %d will never match because Rule %d already %ss all %s traffic from any source.",
+						candidate.Number, prior.Number, prior.Action, protoLabel(prior),
+					),
+				})
+				break
+			}
+		}
+	}
+	return findings
+}
+
+// shadows returns true when rule a completely supersedes rule b.
+func shadows(a, b model.Rule) bool {
+	// a must be broader or equal on every dimension.
+	if !isAnyProto(a.Protocol) && a.Protocol != b.Protocol {
+		return false
+	}
+	// a having a destination port restriction (explicit or via port-group)
+	// makes it narrower.
+	if a.Destination != nil && (a.Destination.Port != "" || hasPortGroup(a.Destination)) {
+		return false
+	}
+	// Any source/destination restriction — address, CIDR, address-group, or MAC —
+	// makes a narrower, so it cannot shadow a broader rule.
+	if !isAddrAny(a.Source) {
+		return false
+	}
+	if !isAddrAny(a.Destination) {
+		return false
+	}
+	// Any GeoIP restriction on a makes it narrower: it only applies to packets
+	// from/to the listed countries, so other traffic falls through to later
+	// rules. A geo-scoped rule therefore can never shadow another rule.
+	if len(a.SourceCountries) > 0 || len(a.DestinationCountries) > 0 {
+		return false
+	}
+	// a with a connection-state restriction is narrower: it only matches the
+	// states it enables, so it cannot shadow a rule that matches other states.
+	// (e.g. an "established,related" rule does not cover a "new" rule.)
+	if a.State != nil && hasAnyState(a.State) && !stateCovers(a.State, b.State) {
+		return false
+	}
+	return true
+}
+
+// stateCovers reports whether rule-state a permits every state that b permits.
+// If b has no state restriction, b accepts all states, so a (which is
+// restricted) cannot cover it.
+func stateCovers(a, b *model.State) bool {
+	if b == nil || !hasAnyState(b) {
+		return false // b matches all states; a is narrower
+	}
+	if b.Established && !a.Established {
+		return false
+	}
+	if b.Related && !a.Related {
+		return false
+	}
+	if b.New && !a.New {
+		return false
+	}
+	if b.Invalid && !a.Invalid {
+		return false
+	}
+	return true
+}
+
+// detectRiskyRules flags allow-any, exposed mgmt ports, broad geo, broad source.
+func (e *Engine) detectRiskyRules() []Finding {
+	var findings []Finding
+	for _, rule := range e.Rules {
+		if rule.Disable {
+			continue
+		}
+		srcAny := isAddrAny(rule.Source)
+		dstAny := isAddrAny(rule.Destination)
+		noPort := rule.Destination == nil || (rule.Destination.Port == "" && !hasPortGroup(rule.Destination))
+
+		// Allow-any: accept with no src/dst/port restriction.
+		if rule.Action == model.ActionAccept && srcAny && dstAny && noPort {
+			findings = append(findings, Finding{
+				Level:   RiskHigh,
+				RuleNum: rule.Number,
+				Code:    "allow_any",
+				Title:   "Allow-any rule — broad accept",
+				Detail:  fmt.Sprintf("Rule %d accepts all %s traffic from any source with no port restriction. Consider narrowing source CIDR or adding a port filter.", rule.Number, protoLabel(rule)),
+			})
+		}
+
+		// Exposed management ports.
+		if rule.Action == model.ActionAccept && srcAny && rule.Destination != nil {
+			for _, p := range []int{22, 23, 3389, 5900} {
+				if portMatches(rule.Destination.Port, p) && rule.Destination.Port != "" {
+					findings = append(findings, Finding{
+						Level:   RiskHigh,
+						RuleNum: rule.Number,
+						Code:    "exposed_mgmt",
+						Title:   fmt.Sprintf("Exposed management port %d", p),
+						Detail:  fmt.Sprintf("Rule %d allows port %d from any source. Restrict to a management CIDR.", rule.Number, p),
+					})
+				}
+			}
+		}
+
+		// Broad GeoIP.
+		if (len(rule.SourceCountries) > 0 || len(rule.DestinationCountries) > 0) &&
+			isAnyProto(rule.Protocol) && noPort {
+			findings = append(findings, Finding{
+				Level:   RiskMedium,
+				RuleNum: rule.Number,
+				Code:    "broad_geo",
+				Title:   "Broad GeoIP policy",
+				Detail:  fmt.Sprintf("Rule %d applies GeoIP filtering across all protocols and ports. VPN tunnels bypass country-based rules.", rule.Number),
+			})
+		}
+
+		// Broad source CIDR on an accept (only when not group-scoped).
+		if rule.Action == model.ActionAccept && rule.Source != nil &&
+			rule.Source.Address == "0.0.0.0/0" && !hasGroup(rule.Source) {
+			findings = append(findings, Finding{
+				Level:   RiskMedium,
+				RuleNum: rule.Number,
+				Code:    "broad_src",
+				Title:   "Broad source CIDR (0.0.0.0/0)",
+				Detail:  fmt.Sprintf("Rule %d accepts from 0.0.0.0/0. Consider restricting to a known source range for better security posture.", rule.Number),
+			})
+		}
+	}
+	return findings
+}
+
+// ─── Translator preview ──────────────────────────────────────────────────────
+
+// ConfigureOp is a single VyOS /configure operation (set, delete, comment).
+type ConfigureOp struct {
+	Op    string   `json:"op"`
+	Path  []string `json:"path"`
+	Value string   `json:"value,omitempty"`
+}
+
+// TranslateRule emits the atomic delete-then-set op array for a rule.
+// Mirrors the real translator: edit = delete node + set fields, all atomic.
+func TranslateRule(ruleSetName string, rule model.Rule) []ConfigureOp {
+	base := []string{"firewall", "ipv4", "name", ruleSetName, "rule", strconv.Itoa(rule.Number)}
+	cp := func(extra ...string) []string {
+		out := make([]string, 0, len(base)+len(extra))
+		out = append(out, base...)
+		out = append(out, extra...)
+		return out
+	}
+	ops := []ConfigureOp{{Op: "delete", Path: base}}
+	ops = append(ops, ConfigureOp{Op: "set", Path: cp("action"), Value: string(rule.Action)})
+	if rule.Description != "" {
+		ops = append(ops, ConfigureOp{Op: "set", Path: cp("description"), Value: rule.Description})
+	}
+	if !isAnyProto(rule.Protocol) {
+		ops = append(ops, ConfigureOp{Op: "set", Path: cp("protocol"), Value: rule.Protocol})
+	}
+	if rule.Source != nil && rule.Source.Address != "" {
+		ops = append(ops, ConfigureOp{Op: "set", Path: cp("source", "address"), Value: rule.Source.Address})
+	}
+	if rule.Destination != nil && rule.Destination.Address != "" {
+		ops = append(ops, ConfigureOp{Op: "set", Path: cp("destination", "address"), Value: rule.Destination.Address})
+	}
+	if rule.Destination != nil && rule.Destination.Port != "" {
+		ops = append(ops, ConfigureOp{Op: "set", Path: cp("destination", "port"), Value: rule.Destination.Port})
+	}
+	if rule.State != nil {
+		if rule.State.Established {
+			ops = append(ops, ConfigureOp{Op: "set", Path: cp("state", "established"), Value: "enable"})
+		}
+		if rule.State.Related {
+			ops = append(ops, ConfigureOp{Op: "set", Path: cp("state", "related"), Value: "enable"})
+		}
+		if rule.State.New {
+			ops = append(ops, ConfigureOp{Op: "set", Path: cp("state", "new"), Value: "enable"})
+		}
+		if rule.State.Invalid {
+			ops = append(ops, ConfigureOp{Op: "set", Path: cp("state", "invalid"), Value: "enable"})
+		}
+	}
+	if len(rule.SourceCountries) > 0 {
+		ops = append(ops, ConfigureOp{Op: "set", Path: cp("source", "geoip", "country-code"), Value: strings.Join(rule.SourceCountries, ",")})
+	}
+	if len(rule.DestinationCountries) > 0 {
+		ops = append(ops, ConfigureOp{Op: "set", Path: cp("destination", "geoip", "country-code"), Value: strings.Join(rule.DestinationCountries, ",")})
+	}
+	return ops
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+func isAnyProto(p string) bool {
+	return p == "" || p == "any" || p == "all"
+}
+
+func isAnyCIDR(s string) bool {
+	return s == "" || s == "0.0.0.0/0" || s == "::/0"
+}
+
+// isAddrAny reports whether an AddrSpec imposes no source/destination
+// restriction at all — no address/CIDR, no address-group, no network-group,
+// no domain-group, and no MAC. A nil spec is "any". A group-scoped spec
+// (e.g. address-group "neysa-trusted") is NOT "any".
+func isAddrAny(a *model.AddrSpec) bool {
+	if a == nil {
+		return true
+	}
+	if a.Address != "" && !isAnyCIDR(a.Address) {
+		return false
+	}
+	if a.MAC != "" {
+		return false
+	}
+	if hasGroup(a) {
+		return false
+	}
+	return true
+}
+
+// hasGroup reports whether the AddrSpec references any address/network/domain/
+// MAC group on its source/destination side.
+func hasGroup(a *model.AddrSpec) bool {
+	if a == nil || a.Group == nil {
+		return false
+	}
+	g := a.Group
+	return g.AddressGroup != "" || g.NetworkGroup != "" ||
+		g.DomainGroup != "" || g.MACGroup != ""
+}
+
+// hasPortGroup reports whether the AddrSpec references a port-group (a port
+// restriction expressed as a group rather than a literal port spec).
+func hasPortGroup(a *model.AddrSpec) bool {
+	return a != nil && a.Group != nil && a.Group.PortGroup != ""
+}
+
+// addrMatches handles plain IPs, CIDRs, and negation ("!10.0.0.1").
+func addrMatches(spec, ip string) bool {
+	negate := false
+	if strings.HasPrefix(spec, "!") {
+		negate = true
+		spec = strings.TrimPrefix(spec, "!")
+	}
+	matched := cidrContains(spec, ip)
+	if negate {
+		return !matched
+	}
+	return matched
+}
+
+func cidrContains(cidr, ip string) bool {
+	if !strings.Contains(cidr, "/") {
+		return net.ParseIP(cidr).Equal(net.ParseIP(ip))
+	}
+	_, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return false
+	}
+	target := net.ParseIP(ip)
+	if target == nil {
+		return false
+	}
+	return network.Contains(target)
+}
+
+// portMatches handles "443", "80,443", and "1000-2000". Empty spec = any.
+func portMatches(spec string, port int) bool {
+	if spec == "" {
+		return true
+	}
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		if strings.Contains(part, "-") {
+			bounds := strings.SplitN(part, "-", 2)
+			lo, err1 := strconv.Atoi(strings.TrimSpace(bounds[0]))
+			hi, err2 := strconv.Atoi(strings.TrimSpace(bounds[1]))
+			if err1 == nil && err2 == nil && port >= lo && port <= hi {
+				return true
+			}
+		} else {
+			if p, err := strconv.Atoi(part); err == nil && p == port {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasAnyState(s *model.State) bool {
+	return s.Established || s.Related || s.New || s.Invalid
+}
+
+func stateMatches(s *model.State, pktState string) bool {
+	switch strings.ToLower(pktState) {
+	case "established":
+		return s.Established
+	case "related":
+		return s.Related
+	case "new":
+		return s.New
+	case "invalid":
+		return s.Invalid
+	}
+	return false
+}
+
+func containsStr(slice []string, s string) bool {
+	for _, v := range slice {
+		if strings.EqualFold(v, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func protoLabel(r model.Rule) string {
+	if isAnyProto(r.Protocol) {
+		return "any-protocol"
+	}
+	return r.Protocol
+}
