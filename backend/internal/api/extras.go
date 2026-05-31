@@ -89,6 +89,8 @@ func (s *Server) RegisterExtras(r chi.Router) {
 
 	// IPsec (site-to-site VPN)
 	s.RegisterIPsecRoutes(r)
+	s.RegisterVPNRoutes(r)
+	s.RegisterVPNPeerRoutes(r)
 
 	// Device tags (minimal endpoint for the production-marker toggle)
 	r.Put("/api/v1/devices/{id}/tags", s.updateDeviceTags)

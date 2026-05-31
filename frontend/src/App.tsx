@@ -17,6 +17,9 @@ import { Interfaces } from './pages/Interfaces'
 import { QoS } from './pages/QoS'
 import { SNMP } from './pages/SNMP'
 import { IPsec } from './pages/IPsec'
+import { VPNIKEProfiles } from './pages/VPNIKEProfiles'
+import { VPNESPProfiles } from './pages/VPNESPProfiles'
+import { VPNPeersPage } from './pages/VPNPeersPage'
 import { LiveConfig } from './pages/LiveConfig'
 import { Users } from './pages/Users'
 import { Overview } from './pages/Overview'
@@ -106,6 +109,10 @@ function Shell({ user, onLogout }: { user: NonNullable<User>; onLogout: () => vo
           <Route path="/devices/:id/qos" element={<QoS />} />
           <Route path="/devices/:id/snmp" element={<SNMP />} />
           <Route path="/devices/:id/ipsec" element={<IPsec />} />
+          <Route path="/vpn" element={<Navigate to="/vpn/ike-profiles" replace />} />
+          <Route path="/vpn/ike-profiles" element={<VPNIKEProfiles />} />
+          <Route path="/vpn/esp-profiles" element={<VPNESPProfiles />} />
+          <Route path="/vpn/peers" element={<VPNPeersPage />} />
           <Route path="/devices/:id/live-config" element={<LiveConfig />} />
           <Route path="/users" element={<Users />} />
           <Route path="/audit" element={<Audit />} />
@@ -119,7 +126,7 @@ function Shell({ user, onLogout }: { user: NonNullable<User>; onLogout: () => vo
 
 function Rail({ open }: { open: boolean }) {
   const [groups, setGroups] = useState<Record<string, boolean>>({
-    overview: true, security: true, network: false, ops: true, platform: false,
+    overview: true, security: true, network: false, vpn: true, ops: true, platform: false,
   })
   const loc = useLocation()
   const toggle = (k: string) => setGroups(g => ({ ...g, [k]: !g[k] }))
@@ -136,6 +143,11 @@ function Rail({ open }: { open: boolean }) {
         <div className="rail-item dim" style={{ fontSize: 11, paddingLeft: 20 }}>
           Pick a device ↑ to edit rules, groups, zones, NAT
         </div>
+      </Group>
+      <Group label="VPN" k="vpn" open={groups.vpn} toggle={toggle}>
+        <Item to="/vpn/ike-profiles" label="IKE Profiles" active={loc.pathname === '/vpn/ike-profiles'} />
+        <Item to="/vpn/esp-profiles" label="ESP Profiles" active={loc.pathname === '/vpn/esp-profiles'} />
+        <Item to="/vpn/peers" label="Peers" active={loc.pathname === '/vpn/peers'} />
       </Group>
       <Group label="Operations" k="ops" open={groups.ops} toggle={toggle}>
         <Item to="/audit" label="Audit log" active={loc.pathname === '/audit'} />

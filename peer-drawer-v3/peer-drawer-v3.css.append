@@ -1,0 +1,30 @@
+
+/* ─────────────────────────────────────────────────────────────────────
+   Crypto Profiles internal grid — Phase 3A drawer v3.
+   Renders IKE (Phase 1) and ESP (Phase 2) detail side-by-side inside
+   the full-width Crypto Profiles card. Mirrors the .crypto-cols
+   pattern from the device IPsec page.
+   ───────────────────────────────────────────────────────────────────── */
+
+.peer2-crypto-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+@media (max-width: 520px) {
+  .peer2-crypto-grid { grid-template-columns: 1fr; gap: 12px; }
+}
+
+.peer2-crypto-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.peer2-crypto-phase {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink, #e6e9ef);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}

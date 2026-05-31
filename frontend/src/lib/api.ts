@@ -313,6 +313,58 @@ export type SAStatus = {
   packets_in: number; packets_out: number; uptime_sec?: number;
 };
 
+// --- VPN profiles (Phase 1) -------------------------------------------------
+
+export type VPNProfile = {
+  id: string
+  type: 'ike' | 'esp'
+  name: string
+  device_id: string
+  device_name?: string
+  ike?: IKEGroup
+  esp?: ESPGroup
+  description: string
+  tags: string[]
+  created_by?: string
+  updated_by?: string
+  created_at?: string
+  updated_at?: string
+  used_by: string[]
+}
+
+export type VPNProfileCreate = {
+  device_id: string
+  type: 'ike' | 'esp'
+  ike?: IKEGroup
+  esp?: ESPGroup
+  description: string
+  tags: string[]
+}
+
+export type VPNProfileUpdate = {
+  ike?: IKEGroup
+  esp?: ESPGroup
+  description: string
+  tags: string[]
+}
+
+// --- VPN peers (Phase 3A) ---------------------------------------------------
+
+export type VPNPeer = {
+  id: string
+  name: string
+  device_id: string
+  device_name?: string
+  peer?: Peer
+  description: string
+  tags: string[]
+  created_by?: string
+  updated_by?: string
+  created_at?: string
+  updated_at?: string
+  used_by: string[]
+}
+
 class API {
   private token: string | null = null;
   constructor() {
@@ -701,6 +753,38 @@ class API {
   deletePeer(id: string, name: string) {
     return this.req<void>(`/api/v1/devices/${id}/ipsec/peers/${encodeURIComponent(name)}`,
       { method: 'DELETE' });
+  }
+
+  // --- VPN profiles (Phase 1) ----------------------------------------------
+  listVPNProfiles() {
+    return this.req<VPNProfile[]>(`/api/v1/vpn/profiles`);
+  }
+  getVPNProfile(id: string) {
+    return this.req<VPNProfile>(`/api/v1/vpn/profiles/${id}`);
+  }
+  createVPNProfile(body: VPNProfileCreate) {
+    return this.req<VPNProfile>(`/api/v1/vpn/profiles`, {
+      method: 'POST', body: JSON.stringify(body),
+    });
+  }
+  updateVPNProfile(id: string, body: VPNProfileUpdate) {
+    return this.req<VPNProfile>(`/api/v1/vpn/profiles/${id}`, {
+      method: 'PUT', body: JSON.stringify(body),
+    });
+  }
+  deleteVPNProfile(id: string) {
+    return this.req<void>(`/api/v1/vpn/profiles/${id}`, { method: 'DELETE' });
+  }
+
+  // --- VPN peers (Phase 3A) ------------------------------------------------
+  listVPNPeers() {
+    return this.req<VPNPeer[]>(`/api/v1/vpn/peers`);
+  }
+  getVPNPeer(id: string) {
+    return this.req<VPNPeer>(`/api/v1/vpn/peers/${id}`);
+  }
+  deleteVPNPeer(id: string) {
+    return this.req<void>(`/api/v1/vpn/peers/${id}`, { method: 'DELETE' });
   }
 }
 

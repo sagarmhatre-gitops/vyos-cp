@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { api, IKEGroup, ESPGroup, Peer, Tunnel } from '../lib/api'
 import TunnelListEditor from './TunnelListEditor'
 import IPsecHero from './IPsecHero'
@@ -29,6 +29,19 @@ export function IPsec() {
   const [editingPeer, setEditingPeer] = useState<Peer | null>(null)
   const [editingIKE, setEditingIKE] = useState<IKEGroup | null>(null)
   const [editingESP, setEditingESP] = useState<ESPGroup | null>(null)
+
+  // Deep-link support for the VPN section:
+  //   ?action=add                 → open the add-peer wizard on mount
+  //   ?peer=<name>&action=edit    → open the edit modal for that peer
+  // Used by the fleet VPN Peers page (Phase 3A) so "+ New peer" and
+  // "Edit on device" land directly in the right modal instead of
+  // dropping the operator on the page with a "now click Add yourself"
+  // prompt.
+  const [searchParams, setSearchParams] = useSearchParams()
+  // We use a ref-like flag so the deep-link only triggers once per mount.
+  // Without it, opening then closing the modal would re-open it on the
+  // next render because the URL params are still present.
+  const [deepLinkConsumed, setDeepLinkConsumed] = useState(false)
 
   const cfgQ = useQuery({
     queryKey: ['ipsec', id],
@@ -101,6 +114,36 @@ export function IPsec() {
       }
     }
   }
+
+  // Deep-link consumer: open the right modal based on URL params.
+  // Runs once per mount (gated by deepLinkConsumed) so the user can
+  // close the modal without it re-opening on the next render.
+  useEffect(() => {
+    if (deepLinkConsumed) return
+    const action = searchParams.get('action')
+    const peerName = searchParams.get('peer')
+    if (action === 'add') {
+      setAdding(true)
+      setDeepLinkConsumed(true)
+      // Clean the URL so a refresh doesn't re-trigger
+      const sp = new URLSearchParams(searchParams)
+      sp.delete('action')
+      setSearchParams(sp, { replace: true })
+      return
+    }
+    if (action === 'edit' && peerName && cfgQ.data?.peers) {
+      const p = cfgQ.data.peers.find(x => x.name === peerName)
+      if (p) {
+        setEditingPeer(p)
+        setDeepLinkConsumed(true)
+        const sp = new URLSearchParams(searchParams)
+        sp.delete('action')
+        sp.delete('peer')
+        setSearchParams(sp, { replace: true })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, cfgQ.data, deepLinkConsumed])
 
   return (
     <>

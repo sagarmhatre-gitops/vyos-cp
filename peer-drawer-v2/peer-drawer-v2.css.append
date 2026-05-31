@@ -1,0 +1,216 @@
+
+/* ─────────────────────────────────────────────────────────────────────
+   VPN Peer drawer v2 — Phase 3A polish, refresh-2 per reference image
+   Mixed layout at 720px: 2-card rows + 1 wide row + table for tunnels.
+   Class prefix .peer2-* to avoid conflict with v1 .peer-* names (which
+   are still present but no longer used by the TSX).
+   ───────────────────────────────────────────────────────────────────── */
+
+/* Hero strip */
+.peer2-hero {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 12px;
+  align-items: start;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 60%), var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.peer2-hero-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(96, 165, 250, 0.12);
+  color: #60a5fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.peer2-hero-icon svg { width: 18px; height: 18px; }
+.peer2-hero-text { min-width: 0; }
+.peer2-hero-line1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.peer2-hero-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink, #e6e9ef);
+}
+.peer2-hero-line2 {
+  font-size: 12px;
+}
+.peer2-hero-desc {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-muted, #9aa3b2);
+  font-style: italic;
+}
+.peer2-hero-hint {
+  font-size: 11px;
+  white-space: nowrap;
+  align-self: end;
+}
+
+/* Pills — config-state only */
+.peer2-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.peer2-pill-ok {
+  background: rgba(43, 224, 166, 0.12);
+  color: var(--ok, #2be0a6);
+  border: 1px solid rgba(43, 224, 166, 0.3);
+}
+.peer2-pill-ok::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--ok, #2be0a6);
+  box-shadow: 0 0 4px rgba(43, 224, 166, 0.6);
+}
+.peer2-pill-muted {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink-muted, #9aa3b2);
+  border: 1px solid var(--line);
+}
+
+/* Card grid: 2-up rows */
+.peer2-card-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+@media (max-width: 600px) {
+  .peer2-card-row { grid-template-columns: 1fr; }
+}
+
+/* Generic card */
+.peer2-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.peer2-card-wide { margin-bottom: 10px; }
+
+.peer2-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.peer2-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink, #e6e9ef);
+}
+
+/* Icon tints — one per card type for visual rhythm */
+.peer2-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.peer2-icon-info  { background: rgba(96, 165, 250, 0.12);  color: #60a5fa; }
+.peer2-icon-link  { background: rgba(43, 224, 166, 0.12);  color: var(--ok, #2be0a6); }
+.peer2-icon-auth  { background: rgba(234, 179, 8, 0.14);   color: #eab308; }
+.peer2-icon-key   { background: rgba(168, 85, 247, 0.12);  color: #a855f7; }
+.peer2-icon-tunnel{ background: rgba(99, 102, 241, 0.14);  color: #818cf8; }
+
+.peer2-card-body {
+  padding: 10px 12px;
+}
+.peer2-card-body-flush {
+  padding: 0;
+}
+
+/* Rows within a card */
+.peer2-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  gap: 12px;
+}
+.peer2-row:last-child { border-bottom: 0; }
+.peer2-row-k {
+  color: var(--ink-muted, #9aa3b2);
+  flex-shrink: 0;
+}
+.peer2-row-v {
+  color: var(--ink, #e6e9ef);
+  text-align: right;
+  word-break: break-all;
+  min-width: 0;
+}
+
+/* Tunnels table */
+.peer2-tunnels-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.peer2-tunnels-table thead th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted, #9aa3b2);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+.peer2-tunnels-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink, #e6e9ef);
+  vertical-align: middle;
+}
+.peer2-tunnels-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.peer2-empty {
+  padding: 16px;
+  font-size: 12px;
+  color: var(--ink-muted, #9aa3b2);
+  text-align: center;
+  font-style: italic;
+}
+
+/* Footer timestamps */
+.peer2-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+}
+.peer2-footer-item strong {
+  font-weight: 600;
+  color: var(--ink-muted, #9aa3b2);
+}
+.peer2-footer-sep {
+  opacity: 0.5;
+}

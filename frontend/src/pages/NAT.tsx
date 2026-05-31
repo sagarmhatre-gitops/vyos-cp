@@ -228,7 +228,7 @@ function NatDonut({ snat, dnat, total }: { snat: number; dnat: number; total: nu
         return el
       })}
       <text x={55} y={51} textAnchor="middle" fontSize={22} fontWeight={700} fill="var(--ink)" fontFamily="var(--font-mono)">{total}</text>
-      <text x={55} y={66} textAnchor="middle" fontSize={9} fill="var(--ink-faint)" textTransform="uppercase">Total</text>
+      <text x={55} y={66} textAnchor="middle" fontSize={9} fill="var(--ink-faint)" style={{ textTransform: "uppercase" }}>Total</text>
     </svg>
   )
 }

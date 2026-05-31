@@ -187,6 +187,7 @@ func RoleAllows(roles []string, action string) bool {
 		"ipsec.esp.upsert", "ipsec.esp.delete",
 		"ipsec.peer.upsert", "ipsec.peer.delete",
 		"ipsec.tunnel.create",
+		"vpn.profile.upsert", "vpn.profile.delete",
 		"template.save", "user.create"}
 	for _, a := range write {
 		if action == a {
